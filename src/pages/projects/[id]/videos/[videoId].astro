@@ -148,7 +148,7 @@ const done: Record<string, boolean> = {
 const ready = done.guion && done.visuales && done.voz;
 const generated = Boolean(video.generated_at);
 const remakeLabel = (type: string, asset: { status: string } | null) =>
-  !asset || asset.status === 'error' ? 'Generar' : type === 'pexels_clip' ? 'Buscar otro clip' : 'Rehacer imagen';
+  !asset || asset.status === 'error' ? 'Generar' : type === 'pexels_clip' ? 'Buscar otro clip' : formats.length > 1 ? 'Rehacer imágenes' : 'Rehacer imagen';
 // Lo que debe existir: una imagen por formato y un clip por visual de video.
 type Job = { index: number; format: FormatId | 'any' };
 const jobs: Job[] = visuals.flatMap((slot, index): Job[] =>
@@ -765,57 +765,50 @@ const field =
               <ol class="mt-3 divide-y divide-border rounded-2xl border border-border bg-surface">
                 {visuals.map((visual, i) => {
                   const slotJobs = jobs.filter((j) => j.index === i);
+                  const slotAssets = slotJobs.map((j) => jobAsset(j));
+                  const redoLabel = remakeLabel(
+                    visual.type,
+                    slotAssets.every((a) => a?.status === 'done') ? { status: 'done' } : null,
+                  );
                   return (
-                    <li id={`visual-${i}`} class="grid scroll-mt-24 gap-3 px-5 py-4 sm:grid-cols-[6.5rem_1fr]">
+                    <li id={`visual-${i}`} class="relative grid scroll-mt-24 gap-3 px-5 py-4 sm:grid-cols-[6.5rem_1fr]">
                       <p class="font-medium tabular-nums text-muted">
                         {clock(visual.start)}–{clock(visual.end)}
                       </p>
                       <div class="min-w-0">
-                        <p class="font-medium">{VISUAL_LABELS[visual.type]}</p>
-                        <p class="mt-1 text-muted">{visual.prompt}</p>
-                        <div class="mt-3 flex flex-wrap gap-3">
+                        <p class="pr-12 font-medium">{VISUAL_LABELS[visual.type]}</p>
+                        <p class="mt-1 pr-12 text-muted">{visual.prompt}</p>
+                        <div class="mt-3 flex flex-wrap gap-4">
                           {slotJobs.map((job) => {
                             const asset = jobAsset(job);
                             const src = asset?.status === 'done' ? urlByPath.get(asset.path) : undefined;
                             const wide = job.format !== '9:16';
                             return (
                               <div class="w-fit">
-                                <div class:list={['relative', wide ? 'w-40' : 'w-24']}>
-                                  <div class:list={['overflow-hidden rounded-lg border border-border bg-bg', wide ? 'h-24 w-40' : 'h-40 w-24']}>
-                                    {src && asset?.mime.startsWith('video/') && (
-                                      <video src={src} controls preload="metadata" class="size-full object-cover" />
-                                    )}
-                                    {src && asset?.mime.startsWith('image/') && (
-                                      <img src={src} alt={visual.prompt} loading="lazy" class="size-full object-cover" />
-                                    )}
-                                  </div>
-                                  {canEdit && (
-                                    <form method="post" action="/api/videos/regenerate" class="absolute right-1.5 top-1.5" data-remake-form>
-                                      <input type="hidden" name="video_id" value={video.id} />
-                                      <input type="hidden" name="index" value={i} />
-                                      <input type="hidden" name="format" value={job.format} />
-                                      <button
-                                        type="submit"
-                                        aria-label={remakeLabel(visual.type, asset)}
-                                        title={remakeLabel(visual.type, asset)}
-                                        class="grid size-8 place-items-center rounded-lg bg-black/60 text-white transition-[background-color,transform] duration-150 ease-out hover:bg-black/80 active:scale-[0.95] disabled:opacity-70"
-                                        data-remake
-                                      >
-                                        <svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-remake-icon>
-                                          <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
-                                          <path d="M21 3v5h-5" />
-                                        </svg>
-                                      </button>
-                                    </form>
+                                <div class:list={['overflow-hidden rounded-xl border border-border bg-bg', wide ? 'h-32 w-56' : 'h-56 w-32']}>
+                                  {src && asset?.mime.startsWith('video/') && (
+                                    <video
+                                      src={`${src}#t=0.1`}
+                                      muted
+                                      loop
+                                      playsinline
+                                      preload="metadata"
+                                      class="size-full cursor-pointer object-cover"
+                                      aria-label={`Vista previa: ${visual.prompt}`}
+                                      data-preview-video
+                                    />
+                                  )}
+                                  {src && asset?.mime.startsWith('image/') && (
+                                    <img src={src} alt={visual.prompt} loading="lazy" class="size-full object-cover" />
                                   )}
                                 </div>
                                 {job.format !== 'any' && formats.length > 1 && (
                                   <p class="mt-1 text-xs text-muted">{FORMATS[job.format].label}</p>
                                 )}
-                                {asset?.status === 'error' && <p class="mt-1 max-w-40 text-sm text-danger">{asset.error}</p>}
+                                {asset?.status === 'error' && <p class="mt-1 max-w-56 text-sm text-danger">{asset.error}</p>}
                                 {!asset && <p class="mt-1 text-sm text-muted">Pendiente</p>}
                                 {asset?.status === 'done' && asset.orientation && !formats.some((f) => (f === '9:16') === (asset.orientation === 'portrait')) && (
-                                  <p class="mt-1 max-w-40 text-xs text-muted">
+                                  <p class="mt-1 max-w-56 text-xs text-muted">
                                     Clip {asset.orientation === 'portrait' ? 'vertical' : 'horizontal'}: se recorta al formato al editar.
                                   </p>
                                 )}
@@ -824,6 +817,25 @@ const field =
                           })}
                         </div>
                       </div>
+                      {canEdit && (
+                        <form method="post" action="/api/videos/regenerate" class="absolute right-4 top-3" data-remake-form>
+                          <input type="hidden" name="video_id" value={video.id} />
+                          <input type="hidden" name="index" value={i} />
+                          <input type="hidden" name="format" value="all" />
+                          <button
+                            type="submit"
+                            aria-label={redoLabel}
+                            title={redoLabel}
+                            class="grid size-9 place-items-center rounded-lg border border-border bg-bg text-muted transition-[color,background-color,transform] duration-150 ease-out hover:bg-surface hover:text-text active:scale-[0.95] disabled:opacity-70"
+                            data-remake
+                          >
+                            <svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" data-remake-icon>
+                              <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
+                              <path d="M21 3v5h-5" />
+                            </svg>
+                          </button>
+                        </form>
+                      )}
                     </li>
                   );
                 })}
@@ -950,6 +962,24 @@ const field =
     document.addEventListener('video:panel', refit);
     window.addEventListener('resize', refit);
     document.fonts?.ready.then(refit);
+
+    // ---- Clips: vista previa al pasar el cursor (con el dedo, un toque la inicia o la detiene) ----
+    for (const video of all<HTMLVideoElement>('[data-preview-video]')) {
+      const stop = () => {
+        video.pause();
+        video.currentTime = 0.1;
+      };
+      video.addEventListener('pointerenter', (event) => {
+        if (event.pointerType === 'mouse') void video.play().catch(() => {});
+      });
+      video.addEventListener('pointerleave', (event) => {
+        if (event.pointerType === 'mouse') stop();
+      });
+      video.addEventListener('click', () => {
+        if (video.paused) void video.play().catch(() => {});
+        else stop();
+      });
+    }
 
     // ---- Rehacer un elemento: solo se bloquea ese botón ----
     for (const form of all<HTMLFormElement>('[data-remake-form]')) {

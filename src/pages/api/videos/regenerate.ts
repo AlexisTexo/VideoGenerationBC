@@ -32,39 +32,47 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
   const slot = visuals[index];
   if (!slot) return back('error=remake');
 
-  // Una imagen se rehace por formato; un clip es uno solo para todos los formatos.
+  // Un clip es uno solo para todos los formatos. Una imagen se rehace por formato; "all" rehace las de todos.
   const formats = ((video.formats ?? []) as unknown[]).filter(isFormatId) as FormatId[];
-  const wanted: FormatId | 'any' = slot.type === 'pexels_clip' ? 'any' : (format as FormatId);
-  if (wanted !== 'any' && !formats.includes(wanted)) return back('error=remake');
+  const targets: (FormatId | 'any')[] =
+    slot.type === 'pexels_clip' ? ['any'] : format === 'all' ? formats : isFormatId(format) && formats.includes(format) ? [format] : [];
+  if (!targets.length) return back('error=remake');
 
   const { data: projectRow } = await supabase.from('projects').select(PROJECT_COLUMNS).eq('id', video.project_id).maybeSingle();
   const project = projectRow as unknown as Project | null;
   if (!project) return new Response('No encontrado', { status: 404 });
 
-  const assets = normalizeAssets(video.assets);
-  const previous = assets.find((a) => a.index === index && a.format === wanted);
+  let assets = normalizeAssets(video.assets);
+  const remadeAll = await Promise.all(
+    targets.map((wanted) =>
+      remakeAsset({
+        supabase,
+        videoId: video.id,
+        project,
+        slot,
+        index,
+        format: wanted,
+        formats: formats.length ? formats : ['9:16'],
+        previous: assets.find((a) => a.index === index && a.format === wanted),
+      }),
+    ),
+  );
 
-  const remade = await remakeAsset({
-    supabase,
-    videoId: video.id,
-    project,
-    slot,
-    index,
-    format: wanted,
-    formats: formats.length ? formats : ['9:16'],
-    previous,
-  });
+  // Si un intento falla y ya había uno bueno, se conserva el anterior (y se avisa).
+  for (const [position, remade] of remadeAll.entries()) {
+    const wanted = targets[position];
+    const previous = assets.find((a) => a.index === index && a.format === wanted);
+    const keepPrevious = remade.status === 'error' && previous?.status === 'done' && previous.type === slot.type;
+    assets = assets.filter((a) => !(a.index === index && a.format === wanted));
+    assets.push(keepPrevious ? previous : remade);
+  }
+  assets.sort((a, b) => a.index - b.index);
 
-  // Si falló y ya había uno bueno, se conserva el anterior (y se avisa).
-  const keepPrevious = remade.status === 'error' && previous?.status === 'done' && previous.type === slot.type;
-  const next = assets.filter((a) => !(a.index === index && a.format === wanted));
-  next.push(keepPrevious ? previous : remade);
-  next.sort((a, b) => a.index - b.index);
-
-  const { error } = await supabase.from('videos').update({ assets: next }).eq('id', video.id);
+  const { error } = await supabase.from('videos').update({ assets }).eq('id', video.id);
   if (error) {
     console.error('guardar elemento rehecho falló:', error.code, error.message);
     return back('error=save');
   }
-  return back(remade.status === 'error' ? `error=remake_failed&detail=${encodeURIComponent(remade.error ?? '')}` : 'ok=remade');
+  const failed = remadeAll.find((r) => r.status === 'error');
+  return back(failed ? `error=remake_failed&detail=${encodeURIComponent(failed.error ?? '')}` : 'ok=remade');
 };
