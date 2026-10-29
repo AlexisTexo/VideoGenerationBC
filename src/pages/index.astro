@@ -51,28 +51,37 @@ const { data: projects, error } = await supabase
               <ProjectLogo name={p.name} logoUrl={p.logo_url} class="size-14" />
 
               <h2 class="mt-4 truncate text-lg font-semibold tracking-tight">
-                <a
-                  href={`/projects/${p.id}`}
-                  class="after:absolute after:inset-0 after:rounded-2xl"
-                  aria-label={`Crear un video de ${p.name}`}
-                >
+                <a href={`/projects/${p.id}`} class="after:absolute after:inset-0 after:rounded-2xl">
                   {p.name}
                 </a>
               </h2>
               {p.description && <p class="mt-1 line-clamp-3 text-muted">{p.description}</p>}
 
               {canEdit && (
-                <a
-                  href={`/projects/${p.id}/settings`}
-                  class="relative z-10 mt-auto grid size-11 place-items-center self-end rounded-xl border border-border bg-bg text-text hover:border-focus hover:bg-surface"
-                  aria-label={`Editar ${p.name}`}
-                  title="Editar proyecto"
-                >
-                  <svg viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path>
-                    <path d="m15 5 4 4"></path>
-                  </svg>
-                </a>
+                <div class="relative z-10 mt-auto flex justify-end gap-2">
+                  <a
+                    href={`/projects/${p.id}`}
+                    class="grid size-11 place-items-center rounded-xl bg-accent text-accent-fg hover:bg-accent-hover"
+                    aria-label={`Crear un video de ${p.name}`}
+                    title="Crear video"
+                  >
+                    <svg viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5"></path>
+                      <rect x="2" y="6" width="14" height="12" rx="2"></rect>
+                    </svg>
+                  </a>
+                  <a
+                    href={`/projects/${p.id}/settings`}
+                    class="grid size-11 place-items-center rounded-xl border border-border bg-bg text-text hover:border-focus hover:bg-surface"
+                    aria-label={`Editar ${p.name}`}
+                    title="Editar proyecto"
+                  >
+                    <svg viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path>
+                      <path d="m15 5 4 4"></path>
+                    </svg>
+                  </a>
+                </div>
               )}
             </li>
           ))}
