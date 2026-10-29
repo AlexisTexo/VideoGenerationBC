@@ -185,6 +185,13 @@ const L = LIMITS;
               </p>
               {submission.review_comment && <p class="mt-3 whitespace-pre-line">{submission.review_comment}</p>}
               {
+                submission.status === 'approved' && (
+                  <a href={`/projects/${submission.project.id}/videos/${submission.video_id}?step=entrega#variantes`} class={`${secondary} mt-4`}>
+                    Crear variantes de este video
+                  </a>
+                )
+              }
+              {
                 submission.status === 'changes_requested' && (
                   <a href={`/projects/${submission.project.id}/videos/${submission.video_id}?step=entrega`} class={`${secondary} mt-4`}>
                     Subir versión corregida

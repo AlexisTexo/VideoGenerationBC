@@ -43,7 +43,7 @@ export interface VisualSlot {
   prompt: string;
 }
 
-const SYSTEM =
+export const SYSTEM =
   'Eres un estratega de contenido para videos cortos en redes (YouTube Shorts, Reels, TikTok). ' +
   'Respondes únicamente con JSON válido, sin texto adicional.';
 
@@ -75,7 +75,7 @@ export function isRepeat(candidate: string, history: Pick<Idea, 'title' | 'angle
   return history.some((h) => similarity(candidate, h.title) >= SIMILAR_THRESHOLD || similarity(candidate, `${h.title} ${h.angle}`) >= SIMILAR_THRESHOLD);
 }
 
-function historyBlock(history: Pick<Idea, 'title' | 'angle' | 'status'>[]): string {
+export function historyBlock(history: Pick<Idea, 'title' | 'angle' | 'status'>[]): string {
   if (!history.length) return '(todavía no hay ideas previas)';
   return history
     .map((h) => `- ${h.title}${h.angle ? ` — ${h.angle}` : ''} [${IDEA_STATUS_LABELS[h.status].toLowerCase()}]`)
@@ -207,6 +207,7 @@ export async function planVisuals(
   project: ProjectInput,
   scenes: Scene[],
   counts: VisualCounts,
+  avoid: string[] = [],
 ): Promise<VisualSlot[]> {
   const total = counts.images + counts.clips;
   const duration = scenes.at(-1)?.end ?? 0;
@@ -223,7 +224,11 @@ Planea los visuales que cubren el video de principio a fin.
 - "start" y "end" son segundos, continuos desde 0 hasta ${duration}. Cada visual cubre el momento de la narración que ilustra.
 - "gemini_image": "prompt" es una descripción en inglés de una escena fotográfica completa (sujeto, lugar, luz), coherente con la marca. Nada de texto legible en la imagen: sin botones con letras, carteles, rótulos ni logotipos. Para mostrar el producto, describe una persona usando una pantalla o un tablero, sin leer su contenido.
 - "pexels_clip": "prompt" son 2 a 5 palabras de búsqueda de video de stock en inglés.
-- Respeta las reglas del producto (por ejemplo, qué no mostrar).
+- Respeta las reglas del producto (por ejemplo, qué no mostrar).${
+    avoid.length
+      ? `\n- Este video es una variante de otro. NO repitas estas escenas ni sus sujetos, lugares o encuadres; propón imágenes y búsquedas claramente distintas:\n${avoid.map((a) => `  · ${a}`).join('\n')}`
+      : ''
+  }
 
 Responde con este JSON exacto:
 {"visuals":[{"start":0,"end":4,"type":"gemini_image","prompt":"..."}]}`;
