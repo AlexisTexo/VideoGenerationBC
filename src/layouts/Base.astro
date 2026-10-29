@@ -6,7 +6,8 @@ interface Props {
   description?: string;
 }
 
-const { title, description = 'Generación y aprobación de videos en masa.' } = Astro.props;
+const { title, description = 'Genera, edita y aprueba videos en masa.' } = Astro.props;
+const ogImage = new URL('/og-image.png', Astro.url.origin).href;
 ---
 
 <!doctype html>
@@ -15,7 +16,20 @@ const { title, description = 'Generación y aprobación de videos en masa.' } = 
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content={description} />
+    <meta name="theme-color" content="#7C05F2" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="VideoGeneratorBC" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content={ogImage} />
+
     <title>{title}</title>
   </head>
   <body class="min-h-dvh antialiased">
