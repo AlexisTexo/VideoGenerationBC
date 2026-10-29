@@ -222,7 +222,7 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
                 <p class="w-full text-sm text-muted" data-bulk-status role="status"></p>
               </div>
               <ul class="space-y-3" data-ideas="suggested">
-                {suggested.map((i) => <IdeaItem {...i} />)}
+                {suggested.map((i) => <IdeaItem {...i} deletable={isAdmin} />)}
               </ul>
               <p class="text-muted" data-empty="suggested" hidden={suggested.length > 0}>
                 No hay ideas pendientes. Pulsa “Dame ideas”.
@@ -271,8 +271,28 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
                 Lo que ya se usó o se descartó. La IA no lo repite; si reutilizas una, la modifica para que se sienta
                 distinta.
               </p>
+              {
+                isAdmin && (
+                  <div class="mb-3 flex flex-wrap items-center justify-between gap-3" data-history-tools>
+                    <button type="button" data-history-all class="h-10 rounded-lg px-3 font-medium text-muted transition-colors hover:text-text">
+                      Elegir todas
+                    </button>
+                    <div class="flex items-center gap-3" data-history-bar hidden>
+                      <p class="text-muted" data-history-count aria-live="polite"></p>
+                      <button
+                        type="button"
+                        data-history-delete
+                        class="inline-flex h-10 items-center rounded-lg border border-danger px-4 font-semibold text-danger transition-[background-color,transform] duration-150 ease-out hover:bg-danger/10 active:scale-[0.97]"
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  </div>
+                )
+              }
+              <p class="mb-3 text-sm text-danger" data-history-error role="alert" hidden></p>
               <ul class="space-y-3" data-ideas="history">
-                {history.map((i) => <IdeaItem {...i} />)}
+                {history.map((i) => <IdeaItem {...i} deletable={isAdmin} />)}
               </ul>
               <p class="text-muted" data-empty="history" hidden={history.length > 0}>Aún no hay historial.</p>
             </div>
@@ -406,8 +426,41 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
       )
     }
 
+    {
+      isAdmin && (
+        <dialog
+          data-ideas-dialog
+          aria-labelledby="ideas-delete-title"
+          class="m-auto w-[min(28rem,calc(100vw-2rem))] rounded-2xl border border-border bg-surface p-6 text-text backdrop:bg-black/60"
+        >
+          <h2 id="ideas-delete-title" class="text-xl font-semibold tracking-tight">¿Eliminar del historial?</h2>
+          <p class="mt-2 font-medium" data-ideas-delete-text></p>
+          <p class="mt-2 text-muted">
+            La IA dejará de tenerlas en cuenta y podría volver a proponer algo parecido. Los videos que ya se hicieron con ellas
+            se quedan. No se puede deshacer.
+          </p>
+          <div class="mt-6 flex justify-end gap-3">
+            <button
+              type="button"
+              data-ideas-delete-cancel
+              class="inline-flex h-11 items-center rounded-xl border border-border bg-bg px-5 font-semibold transition-[background-color,transform] duration-150 ease-out hover:bg-surface active:scale-[0.97]"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              data-ideas-delete-confirm
+              class="inline-flex h-11 items-center rounded-xl bg-danger px-5 font-semibold text-bg transition-[opacity,transform] duration-150 ease-out hover:opacity-90 active:scale-[0.97] disabled:opacity-50"
+            >
+              Eliminar
+            </button>
+          </div>
+        </dialog>
+      )
+    }
+
     <template data-idea-template>
-      <IdeaItem />
+      <IdeaItem deletable={isAdmin} />
     </template>
   </main>
 </Base>
@@ -626,6 +679,79 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
         refreshBulk();
       }
     });
+
+    // ---- Eliminar ideas del historial (solo administrador) ----
+    const ideasDialog = root.querySelector<HTMLDialogElement>('[data-ideas-dialog]');
+    if (ideasDialog) {
+      const bar = q('[data-history-bar]');
+      const count = q('[data-history-count]');
+      const allButton = q<HTMLButtonElement>('[data-history-all]');
+      const problem = q('[data-history-error]');
+      const confirmButton = ideasDialog.querySelector<HTMLButtonElement>('[data-ideas-delete-confirm]')!;
+      const historyPicks = () => all<HTMLInputElement>('[data-ideas="history"] [data-pick-history]');
+      const chosenIdeas = () => historyPicks().filter((p) => p.checked);
+
+      const refreshHistory = () => {
+        const chosen = chosenIdeas().length;
+        const total = historyPicks().length;
+        bar.hidden = chosen === 0;
+        count.textContent = `${chosen} ${chosen === 1 ? 'elegida' : 'elegidas'}`;
+        allButton.textContent = chosen > 0 && chosen === total ? 'Quitar selección' : 'Elegir todas';
+        allButton.parentElement!.hidden = total === 0;
+        for (const pick of historyPicks()) pick.closest<HTMLElement>('[data-idea]')!.dataset.picked = String(pick.checked);
+      };
+      root.addEventListener('change', (event) => {
+        if ((event.target as HTMLElement).matches('[data-pick-history]')) refreshHistory();
+      });
+      allButton.addEventListener('click', () => {
+        const every = historyPicks().length > 0 && chosenIdeas().length === historyPicks().length;
+        for (const pick of historyPicks()) pick.checked = !every;
+        refreshHistory();
+      });
+      // También cuando una idea descartada llega al historial.
+      new MutationObserver(refreshHistory).observe(lists.history, { childList: true });
+
+      q('[data-history-delete]').addEventListener('click', () => {
+        const chosen = chosenIdeas().length;
+        if (!chosen) return;
+        ideasDialog.querySelector('[data-ideas-delete-text]')!.textContent =
+          chosen === 1 ? 'Vas a eliminar 1 idea.' : `Vas a eliminar ${chosen} ideas.`;
+        problem.hidden = true;
+        ideasDialog.showModal();
+      });
+      ideasDialog.querySelector('[data-ideas-delete-cancel]')!.addEventListener('click', () => ideasDialog.close());
+      ideasDialog.addEventListener('click', (event) => {
+        if (event.target === ideasDialog) ideasDialog.close();
+      });
+
+      confirmButton.addEventListener('click', async () => {
+        const items = chosenIdeas().map((p) => p.closest<HTMLElement>('[data-idea]')!);
+        confirmButton.disabled = true;
+        confirmButton.textContent = 'Eliminando…';
+        try {
+          const response = await fetch('/api/ideas/delete', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ ids: items.map((item) => item.dataset.id) }),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error ?? 'save');
+          const gone = new Set<string>(data.ids);
+          for (const item of items) if (gone.has(item.dataset.id ?? '')) item.remove();
+          if (ideaId.value && gone.has(ideaId.value)) ideaId.value = '';
+          refreshLists();
+          refreshHistory();
+        } catch {
+          problem.textContent = 'No se pudieron eliminar. Intenta de nuevo.';
+          problem.hidden = false;
+        } finally {
+          confirmButton.disabled = false;
+          confirmButton.textContent = 'Eliminar';
+          ideasDialog.close();
+        }
+      });
+      refreshHistory();
+    }
 
     // ---- Eliminar un video (solo administrador) ----
     const videoDialog = root.querySelector<HTMLDialogElement>('[data-video-dialog]');

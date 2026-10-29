@@ -6,9 +6,11 @@ interface Props {
   title?: string;
   angle?: string;
   status?: IdeaStatus;
+  /** Se puede elegir para borrarla del historial (solo administrador). */
+  deletable?: boolean;
 }
 
-const { id = '', title = '', angle = '', status = 'suggested' } = Astro.props;
+const { id = '', title = '', angle = '', status = 'suggested', deletable = false } = Astro.props;
 
 const action =
   'h-10 items-center rounded-lg border border-border bg-bg px-4 font-medium transition-[background-color,transform] duration-150 ease-out hover:bg-surface active:scale-[0.97]';
@@ -29,6 +31,18 @@ const action =
         class="block size-5 cursor-pointer accent-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
       />
     </label>
+    {
+      deletable && (
+        <label class="-m-2 hidden shrink-0 cursor-pointer p-2 group-data-[status=discarded]:block group-data-[status=used]:block">
+          <input
+            type="checkbox"
+            data-pick-history
+            aria-label="Elegir para eliminar del historial"
+            class="block size-5 cursor-pointer accent-[var(--accent)]"
+          />
+        </label>
+      )
+    }
     <div class="min-w-0 flex-1">
   <p class="font-semibold" data-idea-title>{title}</p>
   <p class="mt-1 text-muted" data-idea-angle>{angle}</p>
