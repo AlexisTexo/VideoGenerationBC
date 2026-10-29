@@ -1,8 +1,16 @@
 ---
 import LogoMark from './LogoMark.astro';
 import { ROLE_LABELS } from '../lib/roles';
+import { canReview } from '../lib/submissions';
 
-const { user, role } = Astro.locals;
+const { user, role, supabase } = Astro.locals;
+
+// Entregas por aprobar, solo para quien las revisa. Si falta la migración 0015 simplemente no hay número.
+let pending = 0;
+if (role && canReview(role)) {
+  const { count } = await supabase.from('submissions').select('id', { count: 'exact', head: true }).eq('status', 'pending');
+  pending = count ?? 0;
+}
 ---
 
 <header class="border-b border-border">
@@ -12,6 +20,18 @@ const { user, role } = Astro.locals;
         <LogoMark class="size-7" />
         VideoGeneratorBC
       </a>
+      {
+        role && (
+          <a href="/approvals" class="inline-flex items-center gap-2 text-muted transition-colors hover:text-text">
+            Aprobaciones
+            {pending > 0 && (
+              <span class="grid h-5 min-w-5 place-items-center rounded-full bg-accent px-1.5 text-xs font-semibold tabular-nums text-accent-fg" aria-label={`${pending} por aprobar`}>
+                {pending}
+              </span>
+            )}
+          </a>
+        )
+      }
       {
         role === 'admin' && (
           <a href="/admin/users" class="text-muted transition-colors hover:text-text">

@@ -1,0 +1,580 @@
+---
+import Base from '../../layouts/Base.astro';
+import AppHeader from '../../components/AppHeader.astro';
+import ProjectLogo from '../../components/ProjectLogo.astro';
+import { isUuid } from '../../lib/projects';
+import { LIMITS, type Social } from '../../lib/social';
+import {
+  STATUS_LABELS,
+  SUBMISSION_COLUMNS,
+  canReview,
+  formatBytes,
+  formatDuration,
+  isVertical,
+  signedUrls,
+  socialOf,
+  submissionCode,
+  type Submission,
+} from '../../lib/submissions';
+
+const { supabase, role } = Astro.locals;
+const { id } = Astro.params;
+if (!id || !isUuid(id)) return new Response('No encontrado', { status: 404 });
+
+const { data, error } = await supabase
+  .from('submissions')
+  .select(`${SUBMISSION_COLUMNS}, video:videos(title), project:projects(id, name, logo_url)`)
+  .eq('id', id)
+  .maybeSingle();
+if (error) {
+  console.error('cargar entrega falló:', error.code, error.message);
+  return new Response('No se pudo cargar la entrega. Revisa que la migración 0015 esté aplicada.', { status: 500 });
+}
+if (!data) return new Response('No encontrado', { status: 404 });
+
+const submission = data as unknown as Submission & {
+  video: { title: string } | null;
+  project: { id: string; name: string; logo_url: string };
+};
+const urls = await signedUrls(supabase, submission);
+const vertical = isVertical(submission);
+const social = socialOf(submission);
+const code = submissionCode(submission.number);
+const mayReview = canReview(role) && submission.status === 'pending';
+const saved = submission.original_bytes > submission.file_bytes
+  ? Math.round((1 - submission.file_bytes / submission.original_bytes) * 100)
+  : 0;
+
+const ok = Astro.url.searchParams.get('ok');
+const okMessages: Record<string, string> = {
+  uploaded: 'Video subido. Queda pendiente de aprobación.',
+  approved: 'Video aprobado. Abajo están los textos para publicarlo.',
+  changes: 'Se pidieron cambios. Quien subió el video verá tu comentario.',
+  social: 'Textos nuevos escritos.',
+  social_saved: 'Textos guardados.',
+};
+const problem = Astro.url.searchParams.get('error');
+const errorMessages: Record<string, string> = {
+  resolved: 'Esta entrega ya fue revisada o reemplazada por otra versión.',
+  comment: 'Escribe qué debe cambiar antes de pedir cambios.',
+  save: 'No se pudo guardar. Intenta de nuevo.',
+  not_approved: 'Los textos solo se editan cuando el video está aprobado.',
+  social_config: 'Falta GEMINI_API_KEY en el archivo .env del servidor, así que no se pudieron escribir los textos.',
+  social_ai: 'No se pudieron escribir los textos. Pulsa “Escribir de nuevo” para reintentar.',
+};
+
+const statusTone =
+  submission.status === 'approved'
+    ? 'border-ok text-ok'
+    : submission.status === 'changes_requested'
+      ? 'border-danger text-danger'
+      : 'border-border text-muted';
+
+const buttonBase =
+  'inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-base font-semibold transition-[background-color,transform] duration-150 ease-out active:scale-[0.97] disabled:opacity-50 disabled:active:scale-100';
+const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
+const secondary = `${buttonBase} border border-border bg-surface hover:bg-bg`;
+const input =
+  'w-full rounded-xl border border-border bg-bg px-3 py-2.5 text-base focus-visible:border-focus';
+const small =
+  'inline-flex h-9 shrink-0 items-center rounded-lg border border-border bg-bg px-3 text-sm font-medium transition-[background-color,transform] duration-150 ease-out hover:bg-surface active:scale-[0.97]';
+
+const PLATFORMS = [
+  { id: 'youtube', label: 'YouTube' },
+  { id: 'meta', label: 'Meta' },
+  { id: 'tiktok', label: 'TikTok' },
+] as const;
+
+const empty: Social = { youtube: { title: '', description: '', tags: [], hashtags: [] }, meta: { caption: '', hashtags: [] }, tiktok: { caption: '', hashtags: [] } };
+const s = social ?? empty;
+const L = LIMITS;
+---
+
+<Base title={`${submission.video?.title || 'Entrega'} · Aprobación`}>
+  <AppHeader />
+
+  <main class="mx-auto max-w-5xl px-4 py-8" data-approval>
+    <a href="/approvals" class="text-muted transition-colors hover:text-text">← Aprobaciones</a>
+
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex min-w-0 items-center gap-4">
+        <ProjectLogo name={submission.project.name} logoUrl={submission.project.logo_url} class="size-12" />
+        <div class="min-w-0">
+          <h1 class="truncate text-2xl font-semibold tracking-tight">{submission.video?.title || 'Video sin título'}</h1>
+          <p class="text-muted">
+            {submission.project.name} · <span class="tabular-nums">{code}</span> · versión {submission.version}
+          </p>
+        </div>
+      </div>
+      <p class:list={['rounded-full border px-4 py-1.5 font-medium', statusTone]}>{STATUS_LABELS[submission.status]}</p>
+    </div>
+
+    {ok && okMessages[ok] && <p role="status" class="mt-6 text-ok">{okMessages[ok]}</p>}
+    {problem && <p role="alert" class="mt-6 text-danger">{errorMessages[problem] ?? 'Algo salió mal.'}</p>}
+
+    <div class="mt-8 grid gap-8 lg:grid-cols-[minmax(0,22rem)_1fr]">
+      <div>
+        <div class="overflow-hidden rounded-2xl border border-border bg-black">
+          {
+            urls.video ? (
+              <video
+                src={urls.video}
+                poster={urls.poster || undefined}
+                controls
+                playsinline
+                preload="metadata"
+                class:list={['mx-auto block w-full bg-black', vertical ? 'max-h-[34rem]' : 'aspect-video']}
+              />
+            ) : (
+              <p class="grid aspect-video place-items-center p-6 text-center text-white/70">No se pudo cargar el video.</p>
+            )
+          }
+        </div>
+        <dl class="mt-4 grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-sm">
+          <dt class="text-muted">Subido por</dt>
+          <dd class="break-all">{submission.uploaded_by_email}</dd>
+          <dt class="text-muted">Fecha</dt>
+          <dd>{new Date(submission.created_at).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}</dd>
+          {submission.seconds && <><dt class="text-muted">Duración</dt><dd class="tabular-nums">{formatDuration(submission.seconds)}</dd></>}
+          {submission.width && submission.height && <><dt class="text-muted">Tamaño</dt><dd class="tabular-nums">{submission.width}×{submission.height}</dd></>}
+          <dt class="text-muted">Archivo</dt>
+          <dd class="tabular-nums">
+            {formatBytes(submission.file_bytes)}
+            {saved > 0 && <span class="text-muted"> (original {formatBytes(submission.original_bytes)}, {saved}% menos)</span>}
+          </dd>
+        </dl>
+        {
+          submission.note && (
+            <div class="mt-4 rounded-xl border border-border bg-surface p-4">
+              <p class="text-sm font-medium text-muted">Nota de quien lo subió</p>
+              <p class="mt-1 whitespace-pre-line">{submission.note}</p>
+            </div>
+          )
+        }
+      </div>
+
+      <div>
+        {
+          mayReview && (
+            <section class="rounded-2xl border border-border bg-surface p-5" aria-labelledby="review-title">
+              <h2 id="review-title" class="text-xl font-semibold tracking-tight">Tu decisión</h2>
+              <p class="mt-1 text-muted">Si lo apruebas se escriben los textos para YouTube, Meta y TikTok.</p>
+
+              <form method="post" action="/api/submissions/review" class="mt-4" data-review-form>
+                <input type="hidden" name="id" value={submission.id} />
+                <label for="comment" class="mb-2 block font-medium">Comentario <span class="font-normal text-muted">(obligatorio si pides cambios)</span></label>
+                <textarea id="comment" name="comment" rows="3" maxlength="1000" class={`${input} resize-none`} placeholder="Qué debe cambiar, o una nota al aprobar…"></textarea>
+                <div class="mt-4 flex flex-wrap gap-3">
+                  <button type="submit" name="decision" value="approve" class={primary} data-approve>Aprobar</button>
+                  <button type="submit" name="decision" value="changes" class={secondary}>Pedir cambios</button>
+                </div>
+              </form>
+            </section>
+          )
+        }
+
+        {
+          !mayReview && submission.status !== 'pending' && submission.status !== 'replaced' && (
+            <section class="rounded-2xl border border-border bg-surface p-5">
+              <h2 class="text-xl font-semibold tracking-tight">
+                {submission.status === 'approved' ? 'Aprobado' : 'Se pidieron cambios'}
+              </h2>
+              <p class="mt-1 text-sm text-muted">
+                {submission.reviewed_by_email}
+                {submission.reviewed_at ? ` · ${new Date(submission.reviewed_at).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}` : ''}
+              </p>
+              {submission.review_comment && <p class="mt-3 whitespace-pre-line">{submission.review_comment}</p>}
+              {
+                submission.status === 'changes_requested' && (
+                  <a href={`/projects/${submission.project.id}/videos/${submission.video_id}?step=entrega`} class={`${secondary} mt-4`}>
+                    Subir versión corregida
+                  </a>
+                )
+              }
+            </section>
+          )
+        }
+
+        {
+          submission.status === 'pending' && !mayReview && (
+            <section class="rounded-2xl border border-border bg-surface p-5">
+              <h2 class="text-xl font-semibold tracking-tight">Esperando revisión</h2>
+              <p class="mt-1 text-muted">Un administrador o aprobador debe revisar este video.</p>
+            </section>
+          )
+        }
+
+        {
+          submission.status === 'replaced' && (
+            <section class="rounded-2xl border border-border bg-surface p-5">
+              <h2 class="text-xl font-semibold tracking-tight">Versión reemplazada</h2>
+              <p class="mt-1 text-muted">Se subió una versión más reciente de este video.</p>
+              <a href={`/projects/${submission.project.id}/videos/${submission.video_id}?step=entrega`} class={`${secondary} mt-4`}>Ver versiones</a>
+            </section>
+          )
+        }
+      </div>
+    </div>
+
+    {
+      submission.status === 'approved' && (
+        <section id="redes" class="mt-12 scroll-mt-6" aria-labelledby="redes-title" data-social data-vertical={vertical ? '1' : '0'}>
+          <div class="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <h2 id="redes-title" class="text-2xl font-semibold tracking-tight">Publicación en redes</h2>
+              <p class="mt-1 max-w-prose text-muted">
+                Textos breves por plataforma. Edítalos si quieres: la vista previa cambia al escribir y cada campo se copia con su botón.
+              </p>
+            </div>
+            <form method="post" action="/api/submissions/social" data-regenerate-form>
+              <input type="hidden" name="id" value={submission.id} />
+              <input type="hidden" name="action" value="regenerate" />
+              <button type="submit" class={secondary} data-regenerate>{social ? 'Escribir de nuevo' : 'Escribir textos'}</button>
+            </form>
+          </div>
+
+          {
+            !social && (
+              <p class="mt-6 text-muted">Aún no hay textos. Pulsa “Escribir textos” para que se generen con el guion y el contexto del proyecto.</p>
+            )
+          }
+
+          <form method="post" action="/api/submissions/social" class="mt-6" data-social-form>
+            <input type="hidden" name="id" value={submission.id} />
+            <input type="hidden" name="action" value="save" />
+
+            <div role="tablist" aria-label="Plataforma" class="flex gap-1 overflow-x-auto overflow-y-hidden border-b border-border">
+              {
+                PLATFORMS.map((p, i) => (
+                  <button
+                    type="button"
+                    role="tab"
+                    id={`ptab-${p.id}`}
+                    aria-controls={`ppanel-${p.id}`}
+                    aria-selected={i === 0 ? 'true' : 'false'}
+                    tabindex={i === 0 ? 0 : -1}
+                    data-ptab={p.id}
+                    class="-mb-px inline-flex h-12 shrink-0 items-center border-b-2 border-transparent px-4 font-medium text-muted transition-colors hover:text-text aria-selected:border-accent aria-selected:text-text"
+                  >
+                    {p.label}
+                  </button>
+                ))
+              }
+            </div>
+
+            {/* ---------- YouTube ---------- */}
+            <div role="tabpanel" id="ppanel-youtube" aria-labelledby="ptab-youtube" data-ppanel="youtube" class="mt-6 grid gap-8 lg:grid-cols-[minmax(0,22rem)_1fr]">
+              <div class="rounded-2xl border border-border bg-surface p-4" aria-label="Vista previa de YouTube">
+                <p class="mb-3 text-sm font-medium text-muted">Vista previa · {vertical ? 'Shorts' : 'Video'}</p>
+                <div class:list={['relative overflow-hidden rounded-xl bg-black', vertical ? 'mx-auto aspect-[9/16] max-w-56' : 'aspect-video']}>
+                  {urls.poster && <img src={urls.poster} alt="" class="size-full object-cover" />}
+                  <span class="absolute bottom-1.5 right-1.5 rounded bg-black/80 px-1.5 py-0.5 text-xs font-medium text-white tabular-nums">
+                    {formatDuration(submission.seconds) || '0:00'}
+                  </span>
+                </div>
+                <div class="mt-3 flex gap-3">
+                  <ProjectLogo name={submission.project.name} logoUrl={submission.project.logo_url} class="size-9 !rounded-full" />
+                  <div class="min-w-0">
+                    <p class="line-clamp-2 font-semibold leading-snug" data-preview="yt_title">{s.youtube.title || 'Título del video'}</p>
+                    <p class="mt-1 text-sm text-muted">{submission.project.name} · ahora</p>
+                    <p class="mt-2 line-clamp-2 whitespace-pre-line text-sm text-muted" data-preview="yt_description">{s.youtube.description}</p>
+                    <p class="mt-1 text-sm text-link" data-preview="yt_hashtags">{s.youtube.hashtags.map((t) => `#${t}`).join(' ')}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid content-start gap-5">
+                <div>
+                  <div class="mb-2 flex items-center justify-between gap-3">
+                    <label for="yt_title" class="font-medium">Título</label>
+                    <button type="button" class={small} data-copy="yt_title">Copiar</button>
+                  </div>
+                  <input id="yt_title" name="yt_title" value={s.youtube.title} maxlength={L.youtube.title.max} class={input} data-field="yt_title" />
+                  <p class="mt-1 text-sm text-muted tabular-nums" data-count="yt_title" data-max={L.youtube.title.max} data-ideal={L.youtube.title.ideal}></p>
+                </div>
+                <div>
+                  <div class="mb-2 flex items-center justify-between gap-3">
+                    <label for="yt_description" class="font-medium">Descripción</label>
+                    <button type="button" class={small} data-copy="yt_description">Copiar con hashtags</button>
+                  </div>
+                  <textarea id="yt_description" name="yt_description" rows="5" maxlength={L.youtube.description.max} class={`${input} resize-y`} data-field="yt_description">{s.youtube.description}</textarea>
+                  <p class="mt-1 text-sm text-muted tabular-nums" data-count="yt_description" data-max={L.youtube.description.max} data-ideal={L.youtube.description.ideal}></p>
+                </div>
+                <div>
+                  <div class="mb-2 flex items-center justify-between gap-3">
+                    <label for="yt_tags" class="font-medium">Etiquetas</label>
+                    <button type="button" class={small} data-copy="yt_tags">Copiar</button>
+                  </div>
+                  <textarea id="yt_tags" name="yt_tags" rows="2" class={`${input} resize-y`} data-field="yt_tags">{s.youtube.tags.join(', ')}</textarea>
+                  <p class="mt-1 text-sm text-muted tabular-nums" data-tags-count="yt_tags" data-max={L.youtube.tagsTotal}></p>
+                </div>
+                <div>
+                  <div class="mb-2 flex items-center justify-between gap-3">
+                    <label for="yt_hashtags" class="font-medium">Hashtags</label>
+                    <button type="button" class={small} data-copy="yt_hashtags">Copiar</button>
+                  </div>
+                  <input id="yt_hashtags" name="yt_hashtags" value={s.youtube.hashtags.join(', ')} class={input} data-field="yt_hashtags" />
+                  <p class="mt-1 text-sm text-muted">Hasta {L.youtube.hashtags}, separados por coma y sin #. YouTube muestra los primeros 3 sobre el título.</p>
+                </div>
+                <button type="button" class={`${secondary} w-fit`} data-copy-all="youtube">Copiar todo de YouTube</button>
+              </div>
+            </div>
+
+            {/* ---------- Meta ---------- */}
+            <div role="tabpanel" id="ppanel-meta" aria-labelledby="ptab-meta" data-ppanel="meta" hidden class="mt-6 grid gap-8 lg:grid-cols-[minmax(0,22rem)_1fr]">
+              <div class="rounded-2xl border border-border bg-surface p-4" aria-label="Vista previa de Meta">
+                <p class="mb-3 text-sm font-medium text-muted">Vista previa · Instagram y Facebook</p>
+                <div class="flex items-center gap-3">
+                  <ProjectLogo name={submission.project.name} logoUrl={submission.project.logo_url} class="size-9 !rounded-full" />
+                  <p class="font-semibold">{submission.project.name}</p>
+                </div>
+                <div class:list={['relative mt-3 overflow-hidden rounded-lg bg-black', vertical ? 'mx-auto aspect-[4/5] max-w-64' : 'aspect-video']}>
+                  {urls.poster && <img src={urls.poster} alt="" class="size-full object-cover" />}
+                </div>
+                <p class="mt-3 text-sm leading-relaxed">
+                  <span class="font-semibold">{submission.project.name}</span>{' '}
+                  <span class="whitespace-pre-line" data-preview="meta_caption">{s.meta.caption || 'Texto de la publicación'}</span>
+                  <span class="text-muted" data-preview="meta_more" hidden> … más</span>
+                </p>
+                <p class="mt-1 text-sm text-link" data-preview="meta_hashtags">{s.meta.hashtags.map((t) => `#${t}`).join(' ')}</p>
+              </div>
+
+              <div class="grid content-start gap-5">
+                <div>
+                  <div class="mb-2 flex items-center justify-between gap-3">
+                    <label for="meta_caption" class="font-medium">Texto de la publicación</label>
+                    <button type="button" class={small} data-copy="meta_caption">Copiar con hashtags</button>
+                  </div>
+                  <textarea id="meta_caption" name="meta_caption" rows="4" maxlength={L.meta.caption.max} class={`${input} resize-y`} data-field="meta_caption">{s.meta.caption}</textarea>
+                  <p class="mt-1 text-sm text-muted tabular-nums" data-count="meta_caption" data-max={L.meta.caption.max} data-ideal={L.meta.caption.ideal}></p>
+                  <p class="mt-0.5 text-sm text-muted">Lo esencial en los primeros 125 caracteres: después se oculta tras “más”.</p>
+                </div>
+                <div>
+                  <div class="mb-2 flex items-center justify-between gap-3">
+                    <label for="meta_hashtags" class="font-medium">Hashtags</label>
+                    <button type="button" class={small} data-copy="meta_hashtags">Copiar</button>
+                  </div>
+                  <input id="meta_hashtags" name="meta_hashtags" value={s.meta.hashtags.join(', ')} class={input} data-field="meta_hashtags" />
+                  <p class="mt-1 text-sm text-muted">Hasta {L.meta.hashtags}, separados por coma y sin #.</p>
+                </div>
+                <button type="button" class={`${secondary} w-fit`} data-copy-all="meta">Copiar todo de Meta</button>
+              </div>
+            </div>
+
+            {/* ---------- TikTok ---------- */}
+            <div role="tabpanel" id="ppanel-tiktok" aria-labelledby="ptab-tiktok" data-ppanel="tiktok" hidden class="mt-6 grid gap-8 lg:grid-cols-[minmax(0,22rem)_1fr]">
+              <div class="rounded-2xl border border-border bg-surface p-4" aria-label="Vista previa de TikTok">
+                <p class="mb-3 text-sm font-medium text-muted">Vista previa · TikTok</p>
+                <div class="relative mx-auto aspect-[9/16] max-w-60 overflow-hidden rounded-2xl bg-black text-white">
+                  {urls.poster && <img src={urls.poster} alt="" class:list={['size-full', vertical ? 'object-cover' : 'object-contain']} />}
+                  <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-3 pt-12">
+                    <p class="text-sm font-semibold">@{submission.project.name.toLowerCase().replace(/[^a-z0-9]+/g, '')}</p>
+                    <p class="mt-1 text-sm leading-snug">
+                      <span data-preview="tt_caption">{s.tiktok.caption || 'Texto del video'}</span>{' '}
+                      <span class="font-semibold" data-preview="tt_hashtags">{s.tiktok.hashtags.map((t) => `#${t}`).join(' ')}</span>
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="grid content-start gap-5">
+                <div>
+                  <div class="mb-2 flex items-center justify-between gap-3">
+                    <label for="tt_caption" class="font-medium">Texto</label>
+                    <button type="button" class={small} data-copy="tt_caption">Copiar con hashtags</button>
+                  </div>
+                  <textarea id="tt_caption" name="tt_caption" rows="3" maxlength={L.tiktok.caption.max} class={`${input} resize-y`} data-field="tt_caption">{s.tiktok.caption}</textarea>
+                  <p class="mt-1 text-sm text-muted tabular-nums" data-count="tt_caption" data-max={L.tiktok.caption.max} data-ideal={L.tiktok.caption.ideal}></p>
+                </div>
+                <div>
+                  <div class="mb-2 flex items-center justify-between gap-3">
+                    <label for="tt_hashtags" class="font-medium">Hashtags</label>
+                    <button type="button" class={small} data-copy="tt_hashtags">Copiar</button>
+                  </div>
+                  <input id="tt_hashtags" name="tt_hashtags" value={s.tiktok.hashtags.join(', ')} class={input} data-field="tt_hashtags" />
+                  <p class="mt-1 text-sm text-muted">De 3 a {L.tiktok.hashtags}, separados por coma y sin #.</p>
+                </div>
+                <button type="button" class={`${secondary} w-fit`} data-copy-all="tiktok">Copiar todo de TikTok</button>
+              </div>
+            </div>
+
+            <div class="mt-8 flex flex-wrap items-center gap-3 border-t border-border pt-6">
+              <button type="submit" class={primary}>Guardar cambios</button>
+              <p class="text-sm text-muted" role="status" data-copy-status aria-live="polite"></p>
+            </div>
+          </form>
+        </section>
+      )
+    }
+  </main>
+</Base>
+
+<script>
+  const root = document.querySelector<HTMLElement>('[data-approval]');
+
+  if (root) {
+    // ---- Aprobar: evita doble envío ----
+    root.querySelector<HTMLFormElement>('[data-review-form]')?.addEventListener('submit', (event) => {
+      const submitter = (event as SubmitEvent).submitter as HTMLButtonElement | null;
+      const form = event.currentTarget as HTMLFormElement;
+      if (submitter?.value === 'changes' && !form.querySelector<HTMLTextAreaElement>('#comment')!.value.trim()) {
+        event.preventDefault();
+        form.querySelector<HTMLTextAreaElement>('#comment')!.focus();
+        return;
+      }
+      if (submitter?.value === 'approve') submitter.textContent = 'Aprobando y escribiendo textos…';
+      requestAnimationFrame(() => form.querySelectorAll('button').forEach((b) => (b.disabled = true)));
+    });
+
+    const social = root.querySelector<HTMLElement>('[data-social]');
+    if (social) {
+      const el = (name: string) => social.querySelector<HTMLInputElement | HTMLTextAreaElement>(`[data-field="${name}"]`)!;
+      const val = (name: string) => el(name).value.trim();
+      const list = (name: string) =>
+        val(name)
+          .split(/[,\n]/)
+          .map((t) => t.trim().replace(/^#+/, ''))
+          .filter(Boolean);
+      const hashtags = (name: string) => list(name).map((t) => `#${t.replace(/[^\p{L}\p{N}_]/gu, '')}`).join(' ');
+
+      const texts: Record<string, () => string> = {
+        yt_title: () => val('yt_title'),
+        yt_description: () => [val('yt_description'), hashtags('yt_hashtags')].filter(Boolean).join('\n\n'),
+        yt_tags: () => list('yt_tags').join(', '),
+        yt_hashtags: () => hashtags('yt_hashtags'),
+        meta_caption: () => [val('meta_caption'), hashtags('meta_hashtags')].filter(Boolean).join('\n\n'),
+        meta_hashtags: () => hashtags('meta_hashtags'),
+        tt_caption: () => [val('tt_caption'), hashtags('tt_hashtags')].filter(Boolean).join(' '),
+        tt_hashtags: () => hashtags('tt_hashtags'),
+      };
+      const groups: Record<string, string[]> = {
+        youtube: ['yt_title', 'yt_description', 'yt_tags'],
+        meta: ['meta_caption'],
+        tiktok: ['tt_caption'],
+      };
+      const labels: Record<string, string> = { youtube: 'YouTube', meta: 'Meta', tiktok: 'TikTok' };
+      const fieldLabels: Record<string, string> = {
+        yt_title: 'Título',
+        yt_description: 'Descripción',
+        yt_tags: 'Etiquetas',
+      };
+
+      // ---- Vista previa y contadores en vivo ----
+      const previewText = (key: string, text: string) => {
+        const node = social.querySelector<HTMLElement>(`[data-preview="${key}"]`);
+        if (node) node.textContent = text;
+      };
+      const refresh = () => {
+        previewText('yt_title', val('yt_title') || 'Título del video');
+        previewText('yt_description', val('yt_description'));
+        previewText('yt_hashtags', hashtags('yt_hashtags'));
+        previewText('tt_caption', val('tt_caption') || 'Texto del video');
+        previewText('tt_hashtags', hashtags('tt_hashtags'));
+        previewText('meta_hashtags', hashtags('meta_hashtags'));
+
+        const caption = val('meta_caption');
+        const cut = caption.length > 125;
+        previewText('meta_caption', cut ? caption.slice(0, 125).trimEnd() : caption || 'Texto de la publicación');
+        social.querySelector<HTMLElement>('[data-preview="meta_more"]')!.hidden = !cut;
+
+        for (const count of social.querySelectorAll<HTMLElement>('[data-count]')) {
+          const length = el(count.dataset.count!).value.trim().length;
+          const max = Number(count.dataset.max);
+          const ideal = Number(count.dataset.ideal);
+          count.textContent = `${length} de ${max} caracteres${length > ideal ? ` · lo ideal es ${ideal} o menos` : ''}`;
+          count.classList.toggle('text-danger', length >= max);
+        }
+        for (const count of social.querySelectorAll<HTMLElement>('[data-tags-count]')) {
+          const tags = list(count.dataset.tagsCount!);
+          const used = tags.reduce((n, t) => n + t.length + (t.includes(' ') ? 2 : 0), 0) + Math.max(0, tags.length - 1);
+          const max = Number(count.dataset.max);
+          count.textContent = `${tags.length} etiquetas · ${used} de ${max} caracteres`;
+          count.classList.toggle('text-danger', used > max);
+        }
+      };
+      social.addEventListener('input', refresh);
+      refresh();
+
+      // ---- Plataformas ----
+      const ptabs = [...social.querySelectorAll<HTMLButtonElement>('[data-ptab]')];
+      const ppanels = [...social.querySelectorAll<HTMLElement>('[data-ppanel]')];
+      const choose = (id: string) => {
+        for (const tab of ptabs) {
+          const on = tab.dataset.ptab === id;
+          tab.setAttribute('aria-selected', String(on));
+          tab.tabIndex = on ? 0 : -1;
+        }
+        for (const panel of ppanels) panel.hidden = panel.dataset.ppanel !== id;
+      };
+      ptabs.forEach((tab, i) => {
+        tab.addEventListener('click', () => choose(tab.dataset.ptab!));
+        tab.addEventListener('keydown', (event) => {
+          const next = event.key === 'ArrowRight' ? i + 1 : event.key === 'ArrowLeft' ? i - 1 : null;
+          if (next === null) return;
+          const target = ptabs[(next + ptabs.length) % ptabs.length];
+          choose(target.dataset.ptab!);
+          target.focus();
+        });
+      });
+
+      // ---- Copiar ----
+      const status = social.querySelector<HTMLElement>('[data-copy-status]')!;
+      let timer: number | undefined;
+      const say = (message: string) => {
+        status.textContent = message;
+        clearTimeout(timer);
+        timer = window.setTimeout(() => (status.textContent = ''), 2500);
+      };
+      const copy = async (text: string): Promise<boolean> => {
+        if (!text) return false;
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch {
+          const area = document.createElement('textarea');
+          area.value = text;
+          area.style.position = 'fixed';
+          area.style.opacity = '0';
+          document.body.append(area);
+          area.select();
+          const done = document.execCommand('copy');
+          area.remove();
+          return done;
+        }
+      };
+      const flash = (button: HTMLButtonElement) => {
+        const label = button.dataset.label ?? (button.dataset.label = button.textContent ?? '');
+        button.textContent = 'Copiado';
+        setTimeout(() => (button.textContent = label), 1500);
+      };
+
+      for (const button of social.querySelectorAll<HTMLButtonElement>('[data-copy]')) {
+        button.addEventListener('click', async () => {
+          const name = button.dataset.copy!;
+          if (await copy(texts[name]())) flash(button);
+          else say('No hay nada que copiar en ese campo.');
+        });
+      }
+      for (const button of social.querySelectorAll<HTMLButtonElement>('[data-copy-all]')) {
+        button.addEventListener('click', async () => {
+          const group = button.dataset.copyAll!;
+          const parts = groups[group].map((name) => {
+            const body = texts[name]();
+            return fieldLabels[name] ? `${fieldLabels[name]}:\n${body}` : body;
+          });
+          if (await copy(parts.join('\n\n'))) {
+            flash(button);
+            say(`Todo lo de ${labels[group]} copiado.`);
+          } else say('No hay nada que copiar.');
+        });
+      }
+
+      social.querySelector<HTMLFormElement>('[data-regenerate-form]')?.addEventListener('submit', (event) => {
+        const form = event.currentTarget as HTMLFormElement;
+        const button = form.querySelector<HTMLButtonElement>('[data-regenerate]')!;
+        button.textContent = 'Escribiendo…';
+        requestAnimationFrame(() => (button.disabled = true));
+      });
+    }
+  }
+</script>

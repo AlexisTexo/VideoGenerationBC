@@ -1,0 +1,122 @@
+---
+import Base from '../../layouts/Base.astro';
+import AppHeader from '../../components/AppHeader.astro';
+import ProjectLogo from '../../components/ProjectLogo.astro';
+import {
+  FINAL_BUCKET,
+  STATUS_LABELS,
+  SUBMISSION_COLUMNS,
+  canReview,
+  formatBytes,
+  formatDuration,
+  submissionCode,
+  type Submission,
+} from '../../lib/submissions';
+
+const { supabase, role } = Astro.locals;
+
+const FILTERS = [
+  { id: 'pending', label: 'Por aprobar' },
+  { id: 'approved', label: 'Aprobadas' },
+  { id: 'changes_requested', label: 'Cambios pedidos' },
+  { id: 'all', label: 'Todas' },
+] as const;
+const requested = Astro.url.searchParams.get('estado');
+const active = FILTERS.find((f) => f.id === requested)?.id ?? 'pending';
+
+let query = supabase
+  .from('submissions')
+  .select(`${SUBMISSION_COLUMNS}, video:videos(title), project:projects(name, logo_url)`)
+  .order('created_at', { ascending: false })
+  .limit(100);
+query = active === 'all' ? query.neq('status', 'replaced') : query.eq('status', active);
+const { data, error } = await query;
+if (error) console.error('cargar entregas falló:', error.code, error.message);
+
+type Row = Submission & { video: { title: string } | null; project: { name: string; logo_url: string } | null };
+const rows = (data ?? []) as unknown as Row[];
+
+const posterPaths = rows.map((r) => r.poster_path).filter(Boolean);
+const { data: signed } = posterPaths.length
+  ? await supabase.storage.from(FINAL_BUCKET).createSignedUrls(posterPaths, 3600)
+  : { data: [] };
+const posterByPath = new Map((signed ?? []).map((s) => [s.path ?? '', s.signedUrl]));
+---
+
+<Base title="Aprobaciones · VideoGeneratorBC">
+  <AppHeader />
+
+  <main class="mx-auto max-w-5xl px-4 py-10">
+    <div class="rise" style="--i: 0">
+      <h1 class="text-3xl font-semibold tracking-tight">Aprobaciones</h1>
+      <p class="mt-2 text-muted">
+        {
+          canReview(role)
+            ? 'Videos terminados esperando tu revisión. Abre uno para verlo, aprobarlo o pedir cambios.'
+            : 'Los videos que subiste y su estado de revisión.'
+        }
+      </p>
+    </div>
+
+    <nav aria-label="Filtrar por estado" class="rise mt-6 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-border" style="--i: 1">
+      {
+        FILTERS.map((f) => (
+          <a
+            href={f.id === 'pending' ? '/approvals' : `/approvals?estado=${f.id}`}
+            aria-current={f.id === active ? 'page' : undefined}
+            class="-mb-px inline-flex h-12 shrink-0 items-center border-b-2 border-transparent px-4 font-medium text-muted transition-colors hover:text-text aria-[current=page]:border-accent aria-[current=page]:text-text"
+          >
+            {f.label}
+          </a>
+        ))
+      }
+    </nav>
+
+    {error && <p role="alert" class="mt-8 text-danger">No se pudieron cargar las entregas. Revisa que la migración 0015 esté aplicada.</p>}
+    {!error && rows.length === 0 && <p class="mt-10 text-muted">No hay entregas en este estado.</p>}
+
+    {
+      rows.length > 0 && (
+        <ul class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {rows.map((r) => (
+            <li class="relative flex flex-col overflow-hidden rounded-2xl border border-border bg-surface hover:border-focus">
+              <div class="aspect-video bg-bg">
+                {posterByPath.get(r.poster_path) ? (
+                  <img src={posterByPath.get(r.poster_path)} alt="" loading="lazy" class="size-full object-contain" />
+                ) : (
+                  <div class="grid size-full place-items-center text-muted">Sin portada</div>
+                )}
+              </div>
+              <div class="flex flex-1 flex-col p-4">
+                <div class="flex items-center gap-3">
+                  <ProjectLogo name={r.project?.name ?? '?'} logoUrl={r.project?.logo_url ?? ''} class="size-9" />
+                  <div class="min-w-0">
+                    <h2 class="truncate font-semibold tracking-tight">
+                      <a href={`/approvals/${r.id}`} class="after:absolute after:inset-0">
+                        {r.video?.title || 'Video sin título'}
+                      </a>
+                    </h2>
+                    <p class="truncate text-sm text-muted">{r.project?.name}</p>
+                  </div>
+                </div>
+                <p class="mt-3 text-sm text-muted tabular-nums">
+                  {submissionCode(r.number)} · v{r.version}
+                  {r.seconds ? ` · ${formatDuration(r.seconds)}` : ''} · {formatBytes(r.file_bytes)}
+                </p>
+                <p class="mt-0.5 truncate text-sm text-muted">{r.uploaded_by_email}</p>
+                <p
+                  class:list={[
+                    'mt-3 w-fit rounded-full border px-3 py-1 text-sm font-medium',
+                    r.status === 'approved' ? 'border-ok text-ok' : r.status === 'changes_requested' ? 'border-danger text-danger' : 'border-border text-muted',
+                  ]}
+                >
+                  {STATUS_LABELS[r.status]}
+                </p>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )
+    }
+  </main>
+</Base>

@@ -14,6 +14,14 @@ import { generationCode } from '../../../../lib/generations';
 import { loadPreferences, visualsFor } from '../../../../lib/preferences';
 import { LIMITS, recommendedVisuals } from '../../../../lib/video-plan';
 import { canCreate } from '../../../../lib/video-data';
+import {
+  STATUS_LABELS,
+  SUBMISSION_COLUMNS,
+  formatBytes,
+  formatDuration,
+  submissionCode,
+  type Submission,
+} from '../../../../lib/submissions';
 import { VOICE_COLUMNS, type Voice } from '../../../../lib/voices';
 
 const { supabase, role } = Astro.locals;
@@ -76,6 +84,15 @@ const { data: currentGeneration } = currentRow?.current_generation_id
   : { data: null };
 const currentCode = currentGeneration ? generationCode(Number(currentGeneration.number)) : '';
 
+// Entregas (video final para aprobar). Consulta aparte para no romper la página si falta la migración 0015.
+const { data: submissionRows, error: submissionsError } = await supabase
+  .from('submissions')
+  .select(SUBMISSION_COLUMNS)
+  .eq('video_id', videoId)
+  .order('version', { ascending: false });
+if (submissionsError) console.error('cargar entregas falló:', submissionsError.code, submissionsError.message);
+const submissions = (submissionRows ?? []) as unknown as Submission[];
+
 const project = video.project as unknown as { id: string; name: string; logo_url: string };
 const scenes = video.script as Scene[];
 const visuals = video.visuals as VisualSlot[];
@@ -87,6 +104,7 @@ const STEPS = [
   { id: 'voz', label: 'Voz' },
   { id: 'audio', label: 'Audio' },
   { id: 'contenidos', label: 'Contenidos' },
+  { id: 'entrega', label: 'Entrega' },
 ] as const;
 const requested = Astro.url.searchParams.get('step');
 const activeId = STEPS.some((s) => s.id === requested) ? requested : 'guion';
@@ -138,6 +156,14 @@ const errorMessages: Record<string, string> = {
   music_quota: 'Se acabaron los créditos de ElevenLabs o hay demasiadas solicitudes.',
   music_invalid: 'ElevenLabs rechazó la descripción de la música. Prueba con otra.',
   music_request: 'No se pudo generar la música. Intenta de nuevo.',
+  file: 'Elige un archivo de video.',
+  size: 'El archivo pesa demasiado: máximo 300 MB.',
+  type: 'El archivo debe ser un video (MP4, MOV, M4V, WEBM o MKV).',
+  invalid: 'No se pudo leer el video. Revisa que el archivo no esté dañado.',
+  too_long: 'El video dura más de 10 minutos.',
+  failed: 'No se pudo reducir el video. Intenta de nuevo o súbelo en otro formato.',
+  no_ffmpeg: 'El servidor no tiene ffmpeg para reducir el video. Instálalo o sube un MP4 de hasta 50 MB.',
+  final_upload: 'No se pudo guardar el video. Revisa que la migración 0015 esté aplicada.',
 };
 
 // Sin visuales aún: se propone la cantidad recomendada con la proporción de imágenes que esta persona suele usar.
@@ -154,6 +180,7 @@ const done: Record<string, boolean> = {
   voz: Boolean(video.voice_id),
   audio: Boolean(video.music_track_id) || video.sfx,
   contenidos: Boolean(video.generated_at),
+  entrega: submissions.some((s) => s.status === 'approved'),
 };
 const ready = done.guion && done.visuales && done.voz;
 const generated = Boolean(video.generated_at);
@@ -249,7 +276,7 @@ const field =
       }
     </div>
 
-    <div role="tablist" aria-label="Pasos del video" class="mt-8 flex gap-1 border-b border-border" data-tablist>
+    <div role="tablist" aria-label="Pasos del video" class="mt-8 flex gap-1 overflow-x-auto overflow-y-hidden border-b border-border" data-tablist>
       {
         STEPS.map((step) => (
           <button
@@ -260,7 +287,7 @@ const field =
             aria-selected={step.id === activeId ? 'true' : 'false'}
             tabindex={step.id === activeId ? 0 : -1}
             data-tab={step.id}
-            class="-mb-px inline-flex h-12 items-center gap-2 border-b-2 border-transparent px-4 font-medium text-muted transition-colors hover:text-text aria-selected:border-accent aria-selected:text-text"
+            class="-mb-px inline-flex h-12 shrink-0 items-center gap-2 border-b-2 border-transparent px-4 font-medium text-muted transition-colors hover:text-text aria-selected:border-accent aria-selected:text-text"
           >
             {step.label}
             {done[step.id] && (
@@ -833,6 +860,89 @@ const field =
           )
         }
       </section>
+
+      <section role="tabpanel" id="panel-entrega" aria-labelledby="tab-entrega" data-panel="entrega" hidden={activeId !== 'entrega'}>
+        <h2 class="text-2xl font-semibold tracking-tight">Entrega</h2>
+        <p class="mt-2 max-w-prose text-muted">
+          Sube aquí el video ya editado para que lo apruebe un supervisor. Al aprobarlo se escriben los títulos,
+          descripciones y etiquetas para YouTube, Meta y TikTok, con vista previa y botones para copiar.
+        </p>
+
+        {
+          canEdit && (
+            <form
+              method="post"
+              action="/api/submissions/upload"
+              enctype="multipart/form-data"
+              class="mt-6 grid gap-4 rounded-2xl border border-border bg-surface p-5"
+              data-upload-form
+            >
+              <input type="hidden" name="video_id" value={video.id} />
+              <div>
+                <label for="final-file" class="mb-2 block font-medium">Video final</label>
+                <input
+                  id="final-file"
+                  name="file"
+                  type="file"
+                  required
+                  accept="video/*,.mp4,.mov,.m4v,.webm,.mkv"
+                  class="block w-full rounded-xl border border-border bg-bg p-2 text-base file:mr-4 file:h-10 file:rounded-lg file:border-0 file:bg-accent file:px-4 file:font-semibold file:text-accent-fg"
+                />
+                <p class="mt-2 text-sm text-muted">
+                  Hasta 300 MB y 10 minutos. Se guarda una copia a 720p para ahorrar espacio: conserva tú el original.
+                </p>
+              </div>
+              <div>
+                <label for="final-note" class="mb-2 block font-medium">Nota para quien revisa (opcional)</label>
+                <textarea
+                  id="final-note"
+                  name="note"
+                  rows="2"
+                  maxlength="500"
+                  class="w-full resize-none rounded-xl border border-border bg-bg p-3 text-base focus-visible:border-focus"
+                  placeholder="Qué cambió, qué revisar, dónde se publica…"></textarea>
+              </div>
+              <div class="flex flex-wrap items-center gap-3">
+                <button type="submit" class={primary} data-upload-submit>Subir para aprobación</button>
+                <p class="text-sm text-muted" data-upload-status role="status" hidden>
+                  Subiendo y reduciendo el video. Puede tardar unos minutos: no cierres la página.
+                </p>
+              </div>
+            </form>
+          )
+        }
+
+        {
+          submissions.length === 0 ? (
+            <p class="mt-8 text-muted">Aún no hay entregas de este video.</p>
+          ) : (
+            <ul class="mt-8 divide-y divide-border rounded-2xl border border-border bg-surface">
+              {submissions.map((s) => (
+                <li>
+                  <a href={`/approvals/${s.id}`} class="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 px-5 py-4 transition-colors hover:bg-bg">
+                    <span class="min-w-0">
+                      <span class="font-medium">Versión {s.version}</span>
+                      <span class="ml-2 text-muted tabular-nums">{submissionCode(s.number)}</span>
+                      <span class="mt-0.5 block text-sm text-muted">
+                        {new Date(s.created_at).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })} · {s.uploaded_by_email}
+                        {s.seconds ? ` · ${formatDuration(s.seconds)}` : ''} · {formatBytes(s.file_bytes)}
+                      </span>
+                    </span>
+                    <span
+                      class:list={[
+                        'rounded-full border px-3 py-1 text-sm font-medium',
+                        s.status === 'approved' ? 'border-ok text-ok' : s.status === 'changes_requested' ? 'border-danger text-danger' : 'border-border text-muted',
+                      ]}
+                    >
+                      {STATUS_LABELS[s.status]}
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </section>
     </div>
   <template data-voice-template>
       <VoiceItem />
@@ -922,6 +1032,14 @@ const field =
         }
       });
     }
+
+    // ---- Subir entrega ----
+    const uploadForm = root.querySelector<HTMLFormElement>('[data-upload-form]');
+    uploadForm?.addEventListener('submit', () => {
+      const button = uploadForm.querySelector<HTMLButtonElement>('[data-upload-submit]');
+      if (button) button.disabled = true;
+      uploadForm.querySelector<HTMLElement>('[data-upload-status]')?.removeAttribute('hidden');
+    });
 
     // ---- Visuales ----
     const images = q<HTMLInputElement>('#images');
