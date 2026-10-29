@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { VOICE_ID_RE } from '../../../lib/elevenlabs';
 import { isUuid } from '../../../lib/projects';
 import { savePreferences } from '../../../lib/preferences';
+import { rememberVoice } from '../../../lib/voices';
 import { canCreate } from '../../../lib/video-data';
 
 export const prerender = false;
@@ -33,5 +34,7 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
   }
   // Se recuerda para los videos nuevos (si quitó la voz, también se olvida).
   await savePreferences(locals.supabase, locals.user?.id, { voice_id: voiceId, voice_name: voiceName });
-  return back('ok=1');
+  // La voz usada pasa sola a la biblioteca, como la última usada.
+  if (voiceId) await rememberVoice(locals.supabase, voiceId, voiceName);
+  return back(voiceId ? 'ok=voice' : 'ok=1');
 };

@@ -42,6 +42,7 @@ if (!video) {
 const { data: voiceRows, error: voicesError } = await supabase
   .from('voices')
   .select(VOICE_COLUMNS)
+  .order('last_used_at', { ascending: false, nullsFirst: false })
   .order('name', { ascending: true });
 const voices = (voiceRows ?? []) as Voice[];
 
@@ -86,6 +87,7 @@ const okMessages: Record<string, string> = {
   '1': 'Cambios guardados.',
   saved: 'Guion guardado. Apruébalo para poder generar los contenidos.',
   approved: 'Guion aprobado.',
+  voice: 'Voz elegida y guardada en tu biblioteca.',
   generated: 'Contenidos generados.',
   audio: 'Audio guardado.',
   music: 'Música guardada en tu biblioteca.',
@@ -462,8 +464,8 @@ const field =
       <section role="tabpanel" id="panel-voz" aria-labelledby="tab-voz" data-panel="voz" hidden={activeId !== 'voz'}>
         <h2 class="text-2xl font-semibold tracking-tight">Elige la voz</h2>
         <p class="mt-2 max-w-prose text-muted">
-          Pega el ID de una voz de ElevenLabs, escúchala y guárdala en tu biblioteca. Después puedes elegir entre todas
-          tus voces.
+          Pega el ID de una voz de ElevenLabs y escúchala. Las voces que uses en un video se guardan solas en tu
+          biblioteca; también puedes guardar una sin usarla.
         </p>
 
         <form method="post" action="/api/videos/voice" class="mt-6" data-voice-form>
@@ -536,7 +538,7 @@ const field =
           </h3>
           {voicesError && <p class="mt-2 text-danger">Falta la migración 0008 para la biblioteca de voces.</p>}
           <ul class="mt-4 space-y-3" data-voices>
-            {voices.map((v) => <VoiceItem voice={v} />)}
+            {voices.map((v, i) => <VoiceItem voice={v} latest={i === 0 && Boolean(v.last_used_at)} />)}
           </ul>
           <p class="mt-2 text-muted" data-voices-empty hidden={voices.length > 0}>
             Aún no guardas voces. Escucha una y pulsa “Guardar en mi biblioteca”.
@@ -1077,6 +1079,8 @@ const field =
       item.querySelector('[data-item-id]')!.textContent = voice.voice_id;
       const play = item.querySelector<HTMLButtonElement>('[data-item-play]')!;
       play.disabled = !voice.preview_url;
+      const refresh = item.querySelector<HTMLElement>('[data-item-refresh]');
+      if (refresh) refresh.hidden = Boolean(voice.preview_url);
       play.setAttribute('aria-label', `Escuchar ${voice.name || 'voz'}`);
     };
 
@@ -1174,6 +1178,27 @@ const field =
 
       const play = target.closest<HTMLElement>('[data-item-play]');
       if (play && item.dataset.preview) toggleSample(play, item.dataset.preview);
+
+      if (target.closest('[data-item-refresh]')) {
+        const refresh = target.closest<HTMLButtonElement>('[data-item-refresh]')!;
+        refresh.disabled = true;
+        refresh.textContent = 'Cargando…';
+        try {
+          const response = await fetch('/api/voices/save', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ voice_id: item.dataset.voiceId }),
+          });
+          const data = await response.json();
+          if (response.ok) fillItem(item, data.voice);
+          else refresh.textContent = 'No se pudo cargar';
+        } catch {
+          refresh.textContent = 'No se pudo cargar';
+        } finally {
+          refresh.disabled = false;
+          if (!refresh.hidden && refresh.textContent === 'Cargando…') refresh.textContent = 'Cargar muestra';
+        }
+      }
 
       if (target.closest('[data-item-use]')) {
         voiceInput.value = item.dataset.voiceId ?? '';

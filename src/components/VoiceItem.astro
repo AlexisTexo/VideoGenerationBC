@@ -3,9 +3,11 @@ import type { Voice } from '../lib/voices';
 
 interface Props {
   voice?: Partial<Voice>;
+  /** La voz usada más recientemente. */
+  latest?: boolean;
 }
 
-const { voice = {} } = Astro.props;
+const { voice = {}, latest = false } = Astro.props;
 const { id = '', voice_id = '', name = '', preview_url = '' } = voice;
 
 const action =
@@ -37,8 +39,14 @@ const action =
   </button>
   <div class="min-w-0 flex-1">
     <p class="truncate font-semibold" data-item-name>{name || 'Voz sin nombre'}</p>
-    <p class="truncate text-sm text-muted" data-item-id>{voice_id}</p>
+    <p class="truncate text-sm text-muted">
+      <span data-item-id>{voice_id}</span>
+      {latest && <span class="font-medium text-text"> · Última usada</span>}
+    </p>
   </div>
+  <button type="button" data-item-refresh hidden={Boolean(preview_url)} class={action} title="Descargar la muestra de audio de esta voz">
+    Cargar muestra
+  </button>
   <button type="button" data-item-use class={action}>Usar</button>
   <button
     type="button"

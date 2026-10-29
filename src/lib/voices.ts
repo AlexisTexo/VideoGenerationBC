@@ -1,13 +1,15 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { lookupVoice } from './elevenlabs';
 
 export interface Voice {
   id: string;
   voice_id: string;
   name: string;
   preview_url: string;
+  last_used_at: string | null;
 }
 
-export const VOICE_COLUMNS = 'id, voice_id, name, preview_url';
+export const VOICE_COLUMNS = 'id, voice_id, name, preview_url, last_used_at';
 
 const BUCKET = 'voice-previews';
 const MAX_BYTES = 3 * 1024 * 1024;
@@ -61,4 +63,37 @@ export async function removePreview(supabase: SupabaseClient, voiceId: string, p
   if (!previewUrl.includes(`/${BUCKET}/`)) return;
   const { error } = await supabase.storage.from(BUCKET).remove([`${voiceId}.mp3`]);
   if (error) console.error('borrar muestra falló:', error.message);
+}
+
+/**
+ * Deja la voz usada en la biblioteca y la marca como la última usada.
+ * Si es nueva, consulta su nombre y copia la muestra; si ya estaba sin muestra, la completa.
+ * Es de mejor esfuerzo: nunca interrumpe lo que el usuario estaba haciendo.
+ */
+export async function rememberVoice(supabase: SupabaseClient, voiceId: string, fallbackName: string): Promise<void> {
+  try {
+    const now = new Date().toISOString();
+    const { data: existing } = await supabase
+      .from('voices')
+      .select('id, name, preview_url')
+      .eq('voice_id', voiceId)
+      .maybeSingle();
+
+    if (existing?.preview_url && existing.name) {
+      await supabase.from('voices').update({ last_used_at: now }).eq('id', existing.id);
+      return;
+    }
+
+    const found = await lookupVoice(voiceId);
+    const name = (found.ok ? found.voice.name : '') || existing?.name || fallbackName;
+    const preview = found.ok ? await storePreview(supabase, voiceId, found.voice.previewUrl) : (existing?.preview_url ?? '');
+    const row = { name: name.slice(0, 100), preview_url: preview, last_used_at: now };
+
+    const { error } = existing
+      ? await supabase.from('voices').update(row).eq('id', existing.id)
+      : await supabase.from('voices').insert({ voice_id: voiceId, ...row });
+    if (error) console.error('guardar voz en la biblioteca falló:', error.code, error.message);
+  } catch (error) {
+    console.error('recordar voz falló:', error instanceof Error ? error.message : error);
+  }
 }
