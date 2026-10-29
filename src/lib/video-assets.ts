@@ -47,8 +47,11 @@ export function assetFor(assets: Asset[], index: number, slot: VisualSlot, forma
   return assets.find((a) => a.index === index && a.format === wanted && a.type === slot.type && a.prompt === slot.prompt) ?? null;
 }
 
-/** Ruta del archivo dentro del paquete (sin el id del video). */
-export const packageName = (path: string, videoId: string) => path.replace(`${videoId}/`, '');
+/**
+ * Ruta del archivo dentro del paquete (assets/9x16/01.jpg), sin el id del video ni la carpeta de la generación.
+ * Acepta las rutas viejas (<video>/assets/...) y las nuevas (<video>/GEN-00001/assets/...).
+ */
+export const packageName = (path: string) => path.replace(/^[^/]+\/(?:GEN-\d+\/)?/, '');
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -100,7 +103,7 @@ async function upload(supabase: SupabaseClient, path: string, bytes: Uint8Array,
 
 async function makeAsset(
   supabase: SupabaseClient,
-  videoId: string,
+  folder: string,
   project: ProjectInput,
   slot: VisualSlot,
   index: number,
@@ -114,7 +117,7 @@ async function makeAsset(
   if (slot.type === 'gemini_image' && format !== 'any') {
     try {
       const image = await generateImage(imagePrompt(project, slot, format), format);
-      const path = `${videoId}/assets/${FORMATS[format].dir}/${pad(index + 1)}.${EXTENSIONS[image.mime]}`;
+      const path = `${folder}/assets/${FORMATS[format].dir}/${pad(index + 1)}.${EXTENSIONS[image.mime]}`;
       const uploadError = await upload(supabase, path, image.bytes, image.mime);
       if (uploadError) return fail(`No se pudo guardar la imagen: ${uploadError}`);
       return { ...base, status: 'done', path, mime: image.mime };
@@ -138,7 +141,7 @@ async function makeAsset(
   }
   const bytes = await downloadClip(found.clip.url);
   if (!bytes) return fail('No se pudo descargar el clip.');
-  const path = `${videoId}/assets/clips/${pad(index + 1)}.mp4`;
+  const path = `${folder}/assets/clips/${pad(index + 1)}.mp4`;
   const clipError = await upload(supabase, path, bytes, 'video/mp4');
   if (clipError) return fail(`No se pudo guardar el clip: ${clipError}`);
   return {
@@ -176,7 +179,8 @@ export const clipOrientation = (formats: FormatId[]): Orientation =>
  */
 export async function remakeAsset(options: {
   supabase: SupabaseClient;
-  videoId: string;
+  /** Carpeta de la generación en Storage: <video>/<GEN-00001>. */
+  folder: string;
   project: ProjectInput;
   slot: VisualSlot;
   index: number;
@@ -184,9 +188,9 @@ export async function remakeAsset(options: {
   formats: FormatId[];
   previous?: Asset;
 }): Promise<Asset> {
-  const { supabase, videoId, project, slot, index, format, formats, previous } = options;
+  const { supabase, folder, project, slot, index, format, formats, previous } = options;
   const avoid = slot.type === 'pexels_clip' && previous?.source ? [previous.source] : [];
-  return makeAsset(supabase, videoId, project, slot, index, format, clipOrientation(formats), avoid);
+  return makeAsset(supabase, folder, project, slot, index, format, clipOrientation(formats), avoid);
 }
 
 /**
@@ -195,14 +199,15 @@ export async function remakeAsset(options: {
  */
 export async function generateAssets(options: {
   supabase: SupabaseClient;
-  videoId: string;
+  /** Carpeta de la generación en Storage: <video>/<GEN-00001>. */
+  folder: string;
   project: ProjectInput;
   visuals: VisualSlot[];
   formats: FormatId[];
   existing: Asset[];
   force: boolean;
 }): Promise<Asset[]> {
-  const { supabase, videoId, project, visuals, formats, existing, force } = options;
+  const { supabase, folder, project, visuals, formats, existing, force } = options;
   const orientation = clipOrientation(formats);
 
   type Job = { slot: VisualSlot; index: number; format: FormatId | 'any' };
@@ -213,6 +218,15 @@ export async function generateAssets(options: {
   return pool(jobs, 3, async ({ slot, index, format }) => {
     const previous = existing.find((a) => a.index === index && a.format === format);
     const reusable = !force && previous?.status === 'done' && previous.type === slot.type && previous.prompt === slot.prompt;
-    return reusable ? previous : makeAsset(supabase, videoId, project, slot, index, format, orientation);
+    return reusable ? previous : makeAsset(supabase, folder, project, slot, index, format, orientation);
   });
+}
+
+/** Cuántos elementos debe tener un video (una imagen por formato, un clip por visual de video) y cuántos están listos. */
+export function assetProgress(visuals: VisualSlot[], assets: Asset[], formats: FormatId[]) {
+  const wanted = visuals.flatMap((slot, index) =>
+    slot.type === 'pexels_clip' ? [{ slot, index, format: '9:16' as FormatId }] : formats.map((format) => ({ slot, index, format })),
+  );
+  const ready = wanted.filter((j) => assetFor(assets, j.index, j.slot, j.format)?.status === 'done').length;
+  return { ready, total: wanted.length };
 }

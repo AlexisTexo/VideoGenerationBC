@@ -1,0 +1,171 @@
+---
+import Base from '../../../../layouts/Base.astro';
+import AppHeader from '../../../../components/AppHeader.astro';
+import ProjectLogo from '../../../../components/ProjectLogo.astro';
+import VisualRows from '../../../../components/VisualRows.astro';
+import { KIND_LABELS, generationCode, type GenerationSnapshot } from '../../../../lib/generations';
+import { isUuid } from '../../../../lib/projects';
+import { assetProgress, normalizeAssets } from '../../../../lib/video-assets';
+import { canCreate } from '../../../../lib/video-data';
+import { FORMATS, isFormatId, type FormatId } from '../../../../lib/video-format';
+
+const { supabase, role } = Astro.locals;
+const canEdit = canCreate(role);
+
+const { id, generationId } = Astro.params;
+if (!id || !generationId || !isUuid(id) || !isUuid(generationId)) {
+  return new Response('No encontrado', { status: 404 });
+}
+
+const { data: generation, error } = await supabase
+  .from('generations')
+  .select('id, number, video_id, project_id, kind, note, created_by_email, created_at, snapshot')
+  .eq('id', generationId)
+  .eq('project_id', id)
+  .maybeSingle();
+
+if (error) {
+  console.error('cargar generación falló:', error.code, error.message);
+  return new Response('No se pudo cargar la generación. Revisa que la migración 0014 esté aplicada.', { status: 500 });
+}
+if (!generation) {
+  return new Response('No encontrado', { status: 404 });
+}
+
+const snap = generation.snapshot as GenerationSnapshot;
+const code = generationCode(Number(generation.number));
+const formats = ((snap.formats ?? ['9:16']) as unknown[]).filter(isFormatId) as FormatId[];
+const assets = normalizeAssets(snap.assets);
+const progress = assetProgress(snap.visuals ?? [], assets, formats);
+
+const [{ data: project }, { data: videoRow }] = await Promise.all([
+  supabase.from('projects').select('id, name, logo_url').eq('id', id).maybeSingle(),
+  supabase.from('videos').select('id, current_generation_id').eq('id', generation.video_id).maybeSingle(),
+]);
+if (!project) {
+  return new Response('No encontrado', { status: 404 });
+}
+
+const isCurrent = videoRow?.current_generation_id === generation.id;
+const { data: currentGen } =
+  !isCurrent && videoRow?.current_generation_id
+    ? await supabase.from('generations').select('id, number').eq('id', videoRow.current_generation_id).maybeSingle()
+    : { data: null };
+
+const paths = assets.filter((a) => a.status === 'done').map((a) => a.path);
+const { data: signed } = paths.length
+  ? await supabase.storage.from('video-assets').createSignedUrls(paths, 3600)
+  : { data: [] };
+const urls = new Map((signed ?? []).map((s) => [s.path ?? '', s.signedUrl]));
+
+const okParam = Astro.url.searchParams.get('ok');
+const problem = Astro.url.searchParams.get('error');
+const messages: Record<string, string> = {
+  remake: 'No se pudo rehacer: ese elemento ya no está en el plan de visuales.',
+  remake_failed: `No se pudo rehacer${Astro.url.searchParams.get('detail') ? `: ${Astro.url.searchParams.get('detail')}` : ''}. Se conservó el anterior si existía.`,
+  history: 'No se pudo abrir una generación nueva. Revisa que la migración 0014 esté aplicada.',
+  save: 'No se pudieron guardar los cambios.',
+};
+
+const when = new Date(generation.created_at).toLocaleString('es-MX', {
+  dateStyle: 'long',
+  timeStyle: 'short',
+  timeZone: 'America/Mexico_City',
+});
+const button =
+  'inline-flex h-11 items-center justify-center rounded-xl px-5 font-semibold transition-[background-color,transform] duration-150 ease-out active:scale-[0.97]';
+---
+
+<Base title={`${code} · ${project.name}`}>
+  <AppHeader />
+
+  <main class="mx-auto max-w-3xl px-4 py-8">
+    <a href={`/projects/${project.id}/history`} class="text-muted transition-colors hover:text-text">← Historial</a>
+
+    <div class="mt-4 flex items-center gap-4">
+      <ProjectLogo name={project.name} logoUrl={project.logo_url} class="size-12" />
+      <div class="min-w-0">
+        <h1 class="text-2xl font-semibold tracking-tight">
+          <span class="tabular-nums">{code}</span>
+          {isCurrent && <span class="ml-2 text-base font-medium text-ok">Vigente</span>}
+        </h1>
+        <p class="truncate text-muted">{snap.title || 'Video sin título'} · {project.name}</p>
+      </div>
+    </div>
+
+    {okParam === 'remade' && (
+      <p role="status" class="mt-6 text-ok">
+        Listo: elemento rehecho. Esta es la generación nueva, {code}.
+      </p>
+    )}
+    {problem && <p role="alert" class="mt-6 text-danger">{messages[problem] ?? 'Algo salió mal.'}</p>}
+
+    {
+      currentGen && (
+        <p class="mt-6 rounded-xl border border-border bg-surface p-4 text-muted">
+          Esta es una versión anterior. La vigente es{' '}
+          <a class="font-medium text-text underline underline-offset-4" href={`/projects/${project.id}/history/${currentGen.id}`}>
+            {generationCode(Number(currentGen.number))}
+          </a>
+          . Para rehacer algo, hazlo desde la vigente.
+        </p>
+      )
+    }
+
+    <dl class="mt-6 grid gap-x-8 gap-y-2 sm:grid-cols-[auto_1fr]">
+      <dt class="font-medium">Tipo</dt>
+      <dd class="text-muted">{KIND_LABELS[generation.kind as 'generate' | 'remake']}{generation.note && ` · ${generation.note}`}</dd>
+      <dt class="font-medium">Fecha</dt>
+      <dd class="text-muted">{when}</dd>
+      {generation.created_by_email && (
+        <>
+          <dt class="font-medium">Generada por</dt>
+          <dd class="text-muted">{generation.created_by_email}</dd>
+        </>
+      )}
+      <dt class="font-medium">Formatos</dt>
+      <dd class="text-muted">{formats.map((f) => FORMATS[f].label).join(' y ')}</dd>
+      <dt class="font-medium">Voz</dt>
+      <dd class="text-muted">{snap.voice_name || snap.voice_id || 'Sin elegir'}{snap.audio_seconds && ` · ${snap.audio_seconds} s`}</dd>
+      <dt class="font-medium">Audio</dt>
+      <dd class="text-muted">
+        Música: {snap.music?.name ?? 'sin música'} · Efectos de sonido: {snap.sfx ? 'sí' : 'no'}
+      </dd>
+      <dt class="font-medium">Elementos</dt>
+      <dd class="text-muted">{progress.ready} de {progress.total} imágenes y clips listos</dd>
+      <dt class="font-medium">Idea</dt>
+      <dd class="text-muted">{snap.idea}</dd>
+    </dl>
+
+    <div class="mt-6 flex flex-wrap items-center gap-3">
+      <a class={`${button} bg-accent text-accent-fg hover:bg-accent-hover`} href={`/api/videos/zip?generation_id=${generation.id}`} download>
+        Descargar {code}.zip
+      </a>
+      <a class="text-muted underline underline-offset-4 hover:text-text" href={`/api/videos/package?generation_id=${generation.id}&file=timeline.json`} download="timeline.json">
+        timeline.json
+      </a>
+      <a class="text-muted underline underline-offset-4 hover:text-text" href={`/api/videos/package?generation_id=${generation.id}&file=brief.md`} download="brief.md">
+        brief.md
+      </a>
+      <a class="text-muted underline underline-offset-4 hover:text-text" href={`/projects/${project.id}/videos/${generation.video_id}?step=contenidos`}>
+        Abrir el video
+      </a>
+    </div>
+
+    <h2 class="mt-10 text-xl font-semibold tracking-tight">Imágenes y videos</h2>
+    <p class="mt-1 max-w-prose text-muted">
+      {isCurrent && canEdit ? 'Si algo no gusta, usa el ícono de la esquina de su fila: se rehace y queda como una generación nueva, sin borrar esta.' : 'Así quedó esta generación.'}
+    </p>
+    <div class="mt-4">
+      <VisualRows
+        visuals={snap.visuals ?? []}
+        assets={assets}
+        formats={formats}
+        urls={urls}
+        videoId={generation.video_id}
+        canRemake={isCurrent && canEdit}
+        returnTo={`/projects/${project.id}/history/${generation.id}`}
+      />
+    </div>
+  </main>
+</Base>

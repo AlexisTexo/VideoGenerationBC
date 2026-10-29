@@ -32,7 +32,7 @@ const formatsOf = (video: PackageVideo): FormatId[] => {
 export const musicFileName = (path: string) => `music.${path.split('.').pop() ?? 'mp3'}`;
 
 /** Archivo de cada visual dentro del paquete: una imagen por formato, un clip para todos. */
-export function visualFiles(video: PackageVideo, videoId: string) {
+export function visualFiles(video: PackageVideo) {
   return video.visuals.map((slot, i) => {
     const files: Record<string, string> = {};
     let credit: string | null = null;
@@ -41,7 +41,7 @@ export function visualFiles(video: PackageVideo, videoId: string) {
     for (const format of wanted) {
       const asset = assetFor(video.assets, i, slot, format === 'any' ? '9:16' : format);
       if (asset?.status === 'done') {
-        files[format] = packageName(asset.path, videoId);
+        files[format] = packageName(asset.path);
         credit = asset.credit ?? credit;
         orientation = asset.orientation ?? orientation;
       }
@@ -51,10 +51,11 @@ export function visualFiles(video: PackageVideo, videoId: string) {
 }
 
 /** El video como datos: lo que lee Remotion o Hyperframes para editarlo. */
-export function buildTimeline(project: ProjectInput, video: PackageVideo, videoId = '') {
-  const files = visualFiles(video, videoId);
+export function buildTimeline(project: ProjectInput, video: PackageVideo, generationCode = '') {
+  const files = visualFiles(video);
 
   return {
+    generation: generationCode || null,
     title: video.title,
     idea: video.idea,
     durationSeconds: video.audio_seconds ?? video.script.at(-1)?.end ?? video.target_seconds,
@@ -82,8 +83,8 @@ export function buildTimeline(project: ProjectInput, video: PackageVideo, videoI
 }
 
 /** Instrucciones para quien edite el video (Claude con Hyperframes o Remotion). */
-export function buildBrief(project: ProjectInput, video: PackageVideo, videoId = ''): string {
-  const files = visualFiles(video, videoId);
+export function buildBrief(project: ProjectInput, video: PackageVideo, generationCode = ''): string {
+  const files = visualFiles(video);
   const formats = formatsOf(video);
   const scenes = video.script.map((s) => `- [${s.start}–${s.end} s] ${s.narration}`).join('\n');
   const visuals = video.visuals
@@ -102,7 +103,7 @@ export function buildBrief(project: ProjectInput, video: PackageVideo, videoId =
     .join('\n');
 
   return `# Brief del video: ${video.title || project.name}
-
+${generationCode ? `\nGeneración: ${generationCode}\n` : ''}
 Edita este video con Hyperframes o Remotion. Los datos exactos están en \`timeline.json\`.
 
 ## Formatos a entregar

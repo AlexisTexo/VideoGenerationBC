@@ -1,0 +1,138 @@
+---
+import Base from '../../../../layouts/Base.astro';
+import AppHeader from '../../../../components/AppHeader.astro';
+import ProjectLogo from '../../../../components/ProjectLogo.astro';
+import { GENERATION_COLUMNS, KIND_LABELS, generationCode, type Generation, type GenerationSnapshot } from '../../../../lib/generations';
+import { isUuid } from '../../../../lib/projects';
+import { assetProgress, normalizeAssets } from '../../../../lib/video-assets';
+import { isFormatId, type FormatId } from '../../../../lib/video-format';
+
+const { supabase } = Astro.locals;
+const { id } = Astro.params;
+if (!id || !isUuid(id)) {
+  return new Response('No encontrado', { status: 404 });
+}
+
+const { data: project } = await supabase.from('projects').select('id, name, logo_url').eq('id', id).maybeSingle();
+if (!project) {
+  return new Response('No encontrado', { status: 404 });
+}
+
+const videoFilter = Astro.url.searchParams.get('video');
+let query = supabase
+  .from('generations')
+  .select(`${GENERATION_COLUMNS}, snapshot`)
+  .eq('project_id', id)
+  .order('created_at', { ascending: false })
+  .limit(100);
+if (videoFilter && isUuid(videoFilter)) query = query.eq('video_id', videoFilter);
+
+const { data, error } = await query;
+const rows = (data ?? []) as unknown as (Generation & { snapshot: GenerationSnapshot })[];
+
+// La generación vigente de cada video.
+const videoIds = [...new Set(rows.map((r) => r.video_id))];
+const { data: videoRows } = videoIds.length
+  ? await supabase.from('videos').select('id, current_generation_id').in('id', videoIds)
+  : { data: [] };
+const currentIds = new Set((videoRows ?? []).map((v) => v.current_generation_id as string | null));
+
+// Hasta 4 imágenes por generación para reconocerla de un vistazo (un solo lote de enlaces firmados).
+const thumbsOf = (row: (typeof rows)[number]) =>
+  normalizeAssets(row.snapshot?.assets)
+    .filter((a) => a.status === 'done' && a.mime.startsWith('image/'))
+    .slice(0, 4)
+    .map((a) => a.path);
+const paths = [...new Set(rows.flatMap(thumbsOf))];
+const { data: signed } = paths.length
+  ? await supabase.storage.from('video-assets').createSignedUrls(paths, 3600)
+  : { data: [] };
+const urlByPath = new Map((signed ?? []).map((s) => [s.path ?? '', s.signedUrl]));
+
+const when = (iso: string) =>
+  new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Mexico_City' });
+---
+
+<Base title={`Historial · ${project.name}`}>
+  <AppHeader />
+
+  <main class="mx-auto max-w-4xl px-4 py-8">
+    <a href="/" class="text-muted transition-colors hover:text-text">← Proyectos</a>
+
+    <div class="mt-4 flex items-center gap-4">
+      <ProjectLogo name={project.name} logoUrl={project.logo_url} class="size-12" />
+      <div>
+        <h1 class="text-2xl font-semibold tracking-tight">Historial de generaciones</h1>
+        <p class="text-muted">{project.name}</p>
+      </div>
+    </div>
+    <p class="mt-4 max-w-prose text-muted">
+      Cada vez que se generan contenidos o se rehace una imagen queda aquí con su ID. Abre una generación para ver todo
+      lo que se trabajó, rehacer lo que no guste o descargar su paquete.
+    </p>
+
+    {error && <p role="alert" class="mt-6 text-danger">No se pudo cargar el historial. Revisa que la migración 0014 esté aplicada.</p>}
+    {videoFilter && (
+      <p class="mt-6 text-muted">
+        Mostrando un solo video. <a class="underline underline-offset-4 hover:text-text" href={`/projects/${project.id}/history`}>Ver todos</a>
+      </p>
+    )}
+
+    {!error && rows.length === 0 && <p class="mt-10 text-muted">Aún no hay generaciones. Aparecerán al generar los contenidos de un video.</p>}
+
+    {
+      rows.length > 0 && (
+        <ol class="mt-8 divide-y divide-border rounded-2xl border border-border bg-surface">
+          {rows.map((row) => {
+            const snap = row.snapshot;
+            const formats = ((snap?.formats ?? ['9:16']) as unknown[]).filter(isFormatId) as FormatId[];
+            const progress = snap?.visuals ? assetProgress(snap.visuals, normalizeAssets(snap.assets), formats) : null;
+            const thumbs = thumbsOf(row).map((p) => urlByPath.get(p)).filter(Boolean) as string[];
+            const code = generationCode(row.number);
+            return (
+              <li class="relative flex flex-wrap items-center gap-x-5 gap-y-3 px-5 py-4 transition-colors hover:bg-bg">
+                <div class="flex w-36 shrink-0 gap-1" aria-hidden="true">
+                  {thumbs.length ? (
+                    thumbs.map((src) => <img src={src} alt="" loading="lazy" class="h-14 w-8 rounded-md border border-border object-cover" />)
+                  ) : (
+                    <span class="grid h-14 w-full place-items-center rounded-md border border-border bg-bg text-xs text-muted">Sin imágenes</span>
+                  )}
+                </div>
+                <div class="min-w-0 flex-1">
+                  <p class="flex flex-wrap items-center gap-x-2">
+                    <a
+                      href={`/projects/${project.id}/history/${row.id}`}
+                      class="font-semibold tabular-nums after:absolute after:inset-0"
+                    >
+                      {code}
+                    </a>
+                    <span class="text-sm text-muted">{KIND_LABELS[row.kind]}</span>
+                    {currentIds.has(row.id) && <span class="text-sm font-medium text-ok">Vigente</span>}
+                  </p>
+                  <p class="mt-0.5 truncate">{snap?.title || 'Video sin título'}</p>
+                  <p class="mt-0.5 text-sm text-muted">
+                    {row.note && `${row.note} · `}
+                    {when(row.created_at)}
+                    {row.created_by_email && ` · ${row.created_by_email}`}
+                    {progress && ` · ${progress.ready} de ${progress.total} elementos`}
+                  </p>
+                </div>
+                <a
+                  href={`/api/videos/zip?generation_id=${row.id}`}
+                  download
+                  class="relative z-10 grid size-10 shrink-0 place-items-center rounded-lg border border-border bg-bg text-muted transition-[color,background-color,transform] duration-150 ease-out hover:bg-surface hover:text-text active:scale-[0.95]"
+                  aria-label={`Descargar el ZIP de ${code}`}
+                  title={`Descargar ${code}.zip`}
+                >
+                  <svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 3v12M7 10l5 5 5-5M4 21h16" />
+                  </svg>
+                </a>
+              </li>
+            );
+          })}
+        </ol>
+      )
+    }
+  </main>
+</Base>

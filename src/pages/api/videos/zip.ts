@@ -1,8 +1,7 @@
 import type { APIRoute } from 'astro';
-import { PROJECT_COLUMNS, isUuid, type Project } from '../../../lib/projects';
-import { ASSET_BUCKET, normalizeAssets, packageName } from '../../../lib/video-assets';
-import { loadMusic } from '../../../lib/video-data';
-import { buildBrief, buildTimeline, musicFileName, type PackageVideo } from '../../../lib/video-package';
+import { loadPackageSource } from '../../../lib/package-source';
+import { ASSET_BUCKET, packageName } from '../../../lib/video-assets';
+import { buildBrief, buildTimeline, musicFileName } from '../../../lib/video-package';
 import { createZip, type ZipEntry } from '../../../lib/zip';
 
 export const prerender = false;
@@ -16,29 +15,24 @@ const slug = (text: string) =>
     .replace(/^-|-$/g, '')
     .slice(0, 50) || 'video';
 
-/** Descarga todo el paquete en un ZIP: voz, imágenes, clips, timeline.json, brief.md y créditos. */
+/**
+ * Descarga el paquete en un ZIP: voz, música, imágenes, clips, timeline.json, brief.md y créditos.
+ * GET ?generation_id=... (una versión concreta) o ?video_id=... (la vigente). El ZIP se llama como la
+ * generación (GEN-00012.zip) para poder rastrearlo.
+ */
 export const GET: APIRoute = async ({ url, locals }) => {
-  const videoId = url.searchParams.get('video_id') ?? '';
-  if (!isUuid(videoId)) return new Response('No encontrado', { status: 404 });
+  const source = await loadPackageSource(locals.supabase, {
+    videoId: url.searchParams.get('video_id') ?? undefined,
+    generationId: url.searchParams.get('generation_id') ?? undefined,
+  });
+  if (!source) return new Response('No encontrado', { status: 404 });
 
   const { supabase } = locals;
-  const { data: video } = await supabase
-    .from('videos')
-    .select('title, idea, voice_id, voice_name, target_seconds, audio_seconds, audio_path, script, visuals, words, assets, formats, sfx, music_track_id, project_id')
-    .eq('id', videoId)
-    .maybeSingle();
-  if (!video) return new Response('No encontrado', { status: 404 });
-
-  const { data } = await supabase.from('projects').select(PROJECT_COLUMNS).eq('id', video.project_id).maybeSingle();
-  const project = data as unknown as Project | null;
-  if (!project) return new Response('No encontrado', { status: 404 });
-
-  const { music } = await loadMusic(supabase, video.music_track_id);
-  const packaged = { ...video, assets: normalizeAssets(video.assets), music } as unknown as PackageVideo;
+  const { project, video, code } = source;
   const encoder = new TextEncoder();
   const entries: ZipEntry[] = [
-    { name: 'timeline.json', data: encoder.encode(JSON.stringify(buildTimeline(project, packaged, videoId), null, 2)) },
-    { name: 'brief.md', data: encoder.encode(buildBrief(project, packaged, videoId)) },
+    { name: 'timeline.json', data: encoder.encode(JSON.stringify(buildTimeline(project, video, code), null, 2)) },
+    { name: 'brief.md', data: encoder.encode(buildBrief(project, video, code)) },
   ];
 
   const download = async (path: string) => {
@@ -55,15 +49,15 @@ export const GET: APIRoute = async ({ url, locals }) => {
     if (audio) entries.push({ name: 'voiceover.mp3', data: audio });
   }
 
-  if (music) {
-    const bytes = await download(music.path);
-    if (bytes) entries.push({ name: musicFileName(music.path), data: bytes });
+  if (video.music) {
+    const bytes = await download(video.music.path);
+    if (bytes) entries.push({ name: musicFileName(video.music.path), data: bytes });
   }
 
   const credits: string[] = [];
-  for (const asset of packaged.assets) {
+  for (const asset of video.assets) {
     if (asset.status !== 'done') continue;
-    const name = packageName(asset.path, videoId);
+    const name = packageName(asset.path);
     if (entries.some((e) => e.name === name)) continue;
     const bytes = await download(asset.path);
     if (!bytes) continue;
@@ -77,7 +71,7 @@ export const GET: APIRoute = async ({ url, locals }) => {
   return new Response(createZip(entries), {
     headers: {
       'content-type': 'application/zip',
-      'content-disposition': `attachment; filename="${slug(video.title || 'video')}.zip"`,
+      'content-disposition': `attachment; filename="${code || slug(video.title || 'video')}.zip"`,
     },
   });
 };
