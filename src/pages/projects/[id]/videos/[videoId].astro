@@ -6,7 +6,9 @@ import Stepper from '../../../../components/Stepper.astro';
 import VoiceItem from '../../../../components/VoiceItem.astro';
 import { isUuid } from '../../../../lib/projects';
 import { VISUAL_LABELS, type Scene, type VisualSlot } from '../../../../lib/video-ai';
-import type { Asset } from '../../../../lib/video-assets';
+import { assetFor, normalizeAssets } from '../../../../lib/video-assets';
+import { FORMAT_IDS, FORMATS, isFormatId, type FormatId } from '../../../../lib/video-format';
+import { MUSIC_COLUMNS, type MusicTrack } from '../../../../lib/music';
 import { LIMITS, recommendedVisuals } from '../../../../lib/video-plan';
 import { canCreate } from '../../../../lib/video-data';
 import { VOICE_COLUMNS, type Voice } from '../../../../lib/voices';
@@ -22,7 +24,7 @@ if (!id || !videoId || !isUuid(id) || !isUuid(videoId)) {
 const { data: video, error } = await supabase
   .from('videos')
   .select(
-    'id, title, idea, voice_id, voice_name, target_seconds, script, visuals, script_approved, audio_path, audio_seconds, generated_at, assets, project:projects(id, name, logo_url)',
+    'id, title, idea, voice_id, voice_name, target_seconds, script, visuals, script_approved, audio_path, audio_seconds, generated_at, assets, formats, sfx, music_track_id, project:projects(id, name, logo_url)',
   )
   .eq('id', videoId)
   .eq('project_id', id)
@@ -47,10 +49,19 @@ const { data: signed } = video.audio_path
   : { data: null };
 const audioUrl = signed?.signedUrl ?? '';
 
-const assets = (video.assets ?? []) as Asset[];
-const donePaths = assets.filter((a) => a.status === 'done').map((a) => a.path);
-const { data: signedAssets } = donePaths.length
-  ? await supabase.storage.from('video-assets').createSignedUrls(donePaths, 3600)
+const assets = normalizeAssets(video.assets);
+const formats = ((video.formats ?? ['9:16']) as unknown[]).filter(isFormatId) as FormatId[];
+
+const { data: trackRows, error: musicError } = await supabase
+  .from('music_tracks')
+  .select(MUSIC_COLUMNS)
+  .order('created_at', { ascending: false });
+const tracks = (trackRows ?? []) as MusicTrack[];
+
+// Un solo lote de enlaces firmados (privados, 1 h) para imágenes, clips y música.
+const signPaths = [...assets.filter((a) => a.status === 'done').map((a) => a.path), ...tracks.map((t) => t.path)];
+const { data: signedAssets } = signPaths.length
+  ? await supabase.storage.from('video-assets').createSignedUrls(signPaths, 3600)
   : { data: [] };
 const urlByPath = new Map((signedAssets ?? []).map((a) => [a.path ?? '', a.signedUrl]));
 
@@ -63,6 +74,7 @@ const STEPS = [
   { id: 'guion', label: 'Guion' },
   { id: 'visuales', label: 'Visuales' },
   { id: 'voz', label: 'Voz' },
+  { id: 'audio', label: 'Audio' },
   { id: 'contenidos', label: 'Contenidos' },
 ] as const;
 const requested = Astro.url.searchParams.get('step');
@@ -74,6 +86,11 @@ const okMessages: Record<string, string> = {
   saved: 'Guion guardado. Apruébalo para poder generar los contenidos.',
   approved: 'Guion aprobado.',
   generated: 'Contenidos generados.',
+  audio: 'Audio guardado.',
+  music: 'Música guardada en tu biblioteca.',
+  music_default: 'Música predeterminada: se elegirá sola en cada video nuevo.',
+  music_default_off: 'Ya no hay música predeterminada.',
+  music_deleted: 'Música quitada de la biblioteca.',
   partial:
     Astro.url.searchParams.get('failed') === '1'
       ? 'Contenidos generados, pero 1 no se pudo generar. Revisa la lista y pulsa “Completar contenidos” para reintentar.'
@@ -95,6 +112,16 @@ const errorMessages: Record<string, string> = {
   voice_request: 'No se pudo generar la voz. Intenta de nuevo.',
   align: 'La voz se generó, pero no se pudieron ajustar los tiempos.',
   upload: 'No se pudo guardar el audio. Revisa que la migración 0009 esté aplicada.',
+  formats: 'Elige al menos un formato: vertical 9:16 u horizontal 16:9.',
+  music_file: 'El archivo debe ser un audio válido (MP3, WAV, M4A u OGG).',
+  music_size: 'La música pesa demasiado: máximo 15 MB.',
+  music_save: 'No se pudo guardar la música. Revisa que la migración 0011 esté aplicada.',
+  music_prompt: 'Describe la música que quieres (mínimo 5 caracteres).',
+  music_config: 'Falta ELEVENLABS_API_KEY en el archivo .env del servidor.',
+  music_auth: 'ElevenLabs rechazó la clave. Revisa ELEVENLABS_API_KEY.',
+  music_quota: 'Se acabaron los créditos de ElevenLabs o hay demasiadas solicitudes.',
+  music_invalid: 'ElevenLabs rechazó la descripción de la música. Prueba con otra.',
+  music_request: 'No se pudo generar la música. Intenta de nuevo.',
 };
 
 const recommended = recommendedVisuals(Math.round(total) || video.target_seconds);
@@ -105,16 +132,20 @@ const done: Record<string, boolean> = {
   guion: video.script_approved,
   visuales: visuals.length > 0,
   voz: Boolean(video.voice_id),
+  audio: Boolean(video.music_track_id) || video.sfx,
   contenidos: Boolean(video.generated_at),
 };
 const ready = done.guion && done.visuales && done.voz;
 const generated = Boolean(video.generated_at);
-const assetFor = (i: number) => {
-  const asset = assets[i];
-  return asset && asset.type === visuals[i]?.type && asset.prompt === visuals[i]?.prompt ? asset : null;
-};
-const failedCount = visuals.filter((_, i) => assetFor(i)?.status === 'error').length;
-const missingCount = visuals.filter((_, i) => !assetFor(i)).length;
+// Lo que debe existir: una imagen por formato y un clip por visual de video.
+type Job = { index: number; format: FormatId | 'any' };
+const jobs: Job[] = visuals.flatMap((slot, index): Job[] =>
+  slot.type === 'pexels_clip' ? [{ index, format: 'any' }] : formats.map((format) => ({ index, format })),
+);
+const jobAsset = (job: Job) =>
+  assetFor(assets, job.index, visuals[job.index], job.format === 'any' ? '9:16' : job.format);
+const failedCount = jobs.filter((j) => jobAsset(j)?.status === 'error').length;
+const missingCount = jobs.filter((j) => !jobAsset(j)).length;
 const incomplete = generated && (failedCount > 0 || missingCount > 0);
 
 const clock = (seconds: number) => {
@@ -319,6 +350,48 @@ const field =
                 max={LIMITS.maxVisuals}
               />
             </div>
+            <fieldset class="mt-8">
+              <legend class="font-medium">Formato del video</legend>
+              <p class="mt-1 max-w-prose text-sm text-muted">
+                Elige uno o los dos. Se genera una imagen por formato y los subtítulos se acomodan dentro de la zona
+                segura de cada uno (lo que la plataforma no tapa).
+              </p>
+              <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                {
+                  FORMAT_IDS.map((id) => {
+                    const f = FORMATS[id];
+                    const pct = (n: number, of: number) => `${(n / of) * 100}%`;
+                    const { safe, box } = f.subtitles;
+                    return (
+                      <label class="cursor-pointer">
+                        <input type="checkbox" name="formats" value={id} checked={formats.includes(id)} class="peer sr-only" data-format />
+                        <span class="flex items-center gap-4 rounded-xl border border-border bg-surface p-4 transition-colors peer-checked:border-accent peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus">
+                          <span
+                            class="relative block shrink-0 rounded-md border border-border bg-bg"
+                            style={id === '9:16' ? 'width:36px;height:64px' : 'width:64px;height:36px'}
+                            aria-hidden="true"
+                          >
+                            <span
+                              class="absolute rounded-sm border border-dashed border-muted/70"
+                              style={`left:${pct(safe.left, f.width)};right:${pct(safe.right, f.width)};top:${pct(safe.top, f.height)};bottom:${pct(safe.bottom, f.height)}`}
+                            />
+                            <span
+                              class="absolute rounded-sm bg-accent"
+                              style={`left:${pct(box.x, f.width)};width:${pct(box.width, f.width)};top:${pct(box.y + box.height * 0.45, f.height)};height:${pct(box.height * 0.5, f.height)}`}
+                            />
+                          </span>
+                          <span class="min-w-0">
+                            <span class="block font-semibold">{f.label}</span>
+                            <span class="block text-sm text-muted">{f.platforms}</span>
+                            <span class="block text-sm text-muted">Subtítulos de hasta {f.subtitles.maxCharsPerLine} letras por línea</span>
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })
+                }
+              </div>
+            </fieldset>
             <div class="mt-6 rounded-xl border border-border bg-surface p-4">
               <p class="text-lg font-semibold" data-visuals-total aria-live="polite"></p>
               <dl class="mt-3 grid grid-cols-2 divide-x divide-border">
@@ -470,6 +543,194 @@ const field =
         </div>
       </section>
 
+      <section role="tabpanel" id="panel-audio" aria-labelledby="tab-audio" data-panel="audio" hidden={activeId !== 'audio'}>
+        <h2 class="text-2xl font-semibold tracking-tight">Música y efectos</h2>
+        <p class="mt-2 max-w-prose text-muted">
+          Es opcional. Las pistas se guardan en tu biblioteca para usarlas en otros videos; la que marques como
+          predeterminada se elige sola en cada video nuevo.
+        </p>
+        {musicError && <p class="mt-3 text-danger">Falta la migración 0011 para la música y los formatos.</p>}
+
+        <form id="music-form" method="post" action="/api/music" data-music-form>
+          <input type="hidden" name="video_id" value={video.id} />
+        </form>
+
+        <form method="post" action="/api/videos/audio" class="mt-6" data-audio-form>
+          <input type="hidden" name="video_id" value={video.id} />
+          <fieldset disabled={!canEdit}>
+            <label class="flex cursor-pointer items-center gap-3 font-medium">
+              <input type="checkbox" name="sfx" checked={video.sfx} class="size-5 accent-accent" />
+              Añadir efectos de sonido
+            </label>
+            <p class="mt-1 text-sm text-muted">
+              Sonidos discretos en las transiciones y los momentos clave. Se agregan al editar el video.
+            </p>
+
+            <h3 class="mt-8 font-semibold">Música de fondo</h3>
+            <ul class="mt-3 space-y-3">
+              <li>
+                <label class="flex cursor-pointer items-center gap-3 rounded-xl border border-border bg-surface p-3 has-[:checked]:border-accent">
+                  <input type="radio" name="music_track_id" value="" checked={!video.music_track_id} class="size-5 accent-accent" />
+                  <span class="font-medium">Sin música</span>
+                </label>
+              </li>
+              {
+                tracks.map((track) => (
+                  <li class="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface p-3 has-[:checked]:border-accent">
+                    <input
+                      type="radio"
+                      name="music_track_id"
+                      value={track.id}
+                      checked={video.music_track_id === track.id}
+                      aria-label={`Usar ${track.name}`}
+                      class="size-5 shrink-0 accent-accent"
+                    />
+                    <button
+                      type="button"
+                      data-track-play
+                      data-url={urlByPath.get(track.path) ?? ''}
+                      aria-label={`Escuchar ${track.name}`}
+                      class="group/play grid size-10 shrink-0 place-items-center rounded-full bg-accent text-accent-fg transition-[background-color,transform] duration-150 ease-out hover:bg-accent-hover active:scale-[0.97] disabled:opacity-40"
+                      disabled={!urlByPath.get(track.path)}
+                    >
+                      <svg viewBox="0 0 24 24" class="size-4 group-data-[playing=true]/play:hidden" fill="currentColor" aria-hidden="true">
+                        <path d="M8 5.5v13a1 1 0 0 0 1.5.86l10-6.5a1 1 0 0 0 0-1.72l-10-6.5A1 1 0 0 0 8 5.5Z" />
+                      </svg>
+                      <svg viewBox="0 0 24 24" class="hidden size-4 group-data-[playing=true]/play:block" fill="currentColor" aria-hidden="true">
+                        <rect x="6" y="5" width="4" height="14" rx="1" />
+                        <rect x="14" y="5" width="4" height="14" rx="1" />
+                      </svg>
+                    </button>
+                    <div class="min-w-0 flex-1">
+                      <p class="truncate font-semibold">{track.name}</p>
+                      <p class="text-sm text-muted">
+                        {track.source === 'generated' ? 'Generada con IA' : 'Subida por ti'}
+                        {track.is_default && ' · Predeterminada'}
+                      </p>
+                    </div>
+                    {canEdit && (
+                      <>
+                        <button
+                          type="submit"
+                          form="music-form"
+                          name="action"
+                          value={`default:${track.id}`}
+                          formaction="/api/music"
+                          class="inline-flex h-10 shrink-0 items-center rounded-lg border border-border bg-bg px-3 text-sm font-medium transition-[background-color,transform] duration-150 ease-out hover:bg-surface active:scale-[0.97]"
+                          aria-pressed={track.is_default ? 'true' : 'false'}
+                        >
+                          {track.is_default ? 'Quitar predeterminada' : 'Predeterminada'}
+                        </button>
+                        <button
+                          type="submit"
+                          form="music-form"
+                          name="action"
+                          value={`delete:${track.id}`}
+                          aria-label={`Quitar ${track.name} de la biblioteca`}
+                          title="Quitar de la biblioteca"
+                          class="grid size-10 shrink-0 place-items-center rounded-lg border border-border text-muted transition-[color,background-color,transform] duration-150 ease-out hover:bg-bg hover:text-danger active:scale-[0.97]"
+                        >
+                          <svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                            <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" />
+                          </svg>
+                        </button>
+                      </>
+                    )}
+                  </li>
+                ))
+              }
+            </ul>
+            {tracks.length === 0 && <p class="mt-3 text-muted">Aún no hay música. Sube un archivo o genera una pista abajo.</p>}
+          </fieldset>
+          {
+            canEdit && (
+              <div class="mt-6 flex flex-wrap items-center gap-3">
+                <button type="submit" class={primary}>Guardar audio</button>
+                <p class="text-sm text-muted">Guarda los efectos y la música elegida para este video.</p>
+              </div>
+            )
+          }
+        </form>
+        <audio hidden data-track-audio></audio>
+
+        {
+          canEdit && (
+            <div class="mt-12 border-t border-border pt-8">
+              <h3 class="text-xl font-semibold tracking-tight">Añadir música</h3>
+              <div class="mt-4 inline-flex rounded-xl border border-border bg-surface p-1" role="group" aria-label="Cómo añadir música">
+                <button type="button" data-music-tab="upload" aria-pressed="true" class="h-10 rounded-lg px-4 font-medium text-muted transition-colors aria-pressed:bg-bg aria-pressed:text-text">
+                  Subir archivo
+                </button>
+                <button type="button" data-music-tab="generate" aria-pressed="false" class="h-10 rounded-lg px-4 font-medium text-muted transition-colors aria-pressed:bg-bg aria-pressed:text-text">
+                  Generar con IA
+                </button>
+              </div>
+
+              <form method="post" action="/api/music" enctype="multipart/form-data" class="mt-5 space-y-4" data-music-panel="upload">
+                <input type="hidden" name="video_id" value={video.id} />
+                <input type="hidden" name="action" value="upload" />
+                <div>
+                  <label for="music-name" class="mb-2 block font-medium">Nombre</label>
+                  <input id="music-name" name="name" maxlength="100" placeholder="Opcional: usa el nombre del archivo" class={field} />
+                </div>
+                <div>
+                  <label for="music-file" class="mb-2 block font-medium">Archivo de audio</label>
+                  <input
+                    id="music-file"
+                    name="file"
+                    type="file"
+                    required
+                    accept="audio/mpeg,audio/wav,audio/mp4,audio/ogg,.mp3,.wav,.m4a,.ogg"
+                    class="block w-full text-base file:mr-4 file:h-10 file:cursor-pointer file:rounded-lg file:border file:border-border file:bg-surface file:px-4 file:font-medium file:text-text hover:file:bg-bg"
+                  />
+                  <p class="mt-2 text-sm text-muted">MP3, WAV, M4A u OGG, máximo 15 MB. Usa música con licencia para tu uso.</p>
+                </div>
+                <label class="flex cursor-pointer items-center gap-3">
+                  <input type="checkbox" name="make_default" class="size-5 accent-accent" />
+                  Usarla como predeterminada en los videos nuevos
+                </label>
+                <button type="submit" class={secondary} data-music-submit>Subir música</button>
+              </form>
+
+              <form method="post" action="/api/music" class="mt-5 hidden space-y-4" data-music-panel="generate">
+                <input type="hidden" name="video_id" value={video.id} />
+                <input type="hidden" name="action" value="generate" />
+                <div>
+                  <label for="music-prompt" class="mb-2 block font-medium">Cómo debe sonar</label>
+                  <textarea
+                    id="music-prompt"
+                    name="prompt"
+                    rows="3"
+                    maxlength="500"
+                    required
+                    placeholder="Por ejemplo: tecnología moderna, ritmo medio, motivadora, sin voces"
+                    class="min-h-24 w-full rounded-xl border border-border bg-surface p-4 text-base focus-visible:border-focus"
+                  ></textarea>
+                  <p class="mt-2 text-sm text-muted">
+                    Dura {Math.round(video.audio_seconds ?? video.target_seconds)} s, lo mismo que el video, y es
+                    instrumental. Usa créditos de ElevenLabs.
+                  </p>
+                </div>
+                <div>
+                  <label for="music-gen-name" class="mb-2 block font-medium">Nombre</label>
+                  <input id="music-gen-name" name="name" maxlength="100" placeholder="Opcional" class={field} />
+                </div>
+                <label class="flex cursor-pointer items-center gap-3">
+                  <input type="checkbox" name="make_default" class="size-5 accent-accent" />
+                  Usarla como predeterminada en los videos nuevos
+                </label>
+                <button type="submit" class={secondary} data-music-submit>Generar música</button>
+              </form>
+            </div>
+          )
+        }
+
+        <div class="mt-10 flex justify-between">
+          <button type="button" class={secondary} data-goto="voz">← Voz</button>
+          <button type="button" class={secondary} data-goto="contenidos">Siguiente: contenidos →</button>
+        </div>
+      </section>
+
       <section role="tabpanel" id="panel-contenidos" aria-labelledby="tab-contenidos" data-panel="contenidos" hidden={activeId !== 'contenidos'}>
         <h2 class="text-2xl font-semibold tracking-tight">Contenidos</h2>
         {
@@ -487,41 +748,61 @@ const field =
               )}
 
               <h3 class="mt-8 font-semibold">
-                Imágenes y videos <span class="font-normal text-muted tabular-nums">({visuals.length - failedCount - missingCount} de {visuals.length})</span>
+                Imágenes y videos <span class="font-normal text-muted tabular-nums">({jobs.length - failedCount - missingCount} de {jobs.length})</span>
               </h3>
               <ol class="mt-3 divide-y divide-border rounded-2xl border border-border bg-surface">
                 {visuals.map((visual, i) => {
-                  const asset = assetFor(i);
-                  const src = asset?.status === 'done' ? urlByPath.get(asset.path) : undefined;
+                  const slotJobs = jobs.filter((j) => j.index === i);
                   return (
-                    <li class="grid gap-3 px-5 py-4 sm:grid-cols-[6.5rem_9rem_1fr]">
+                    <li class="grid gap-3 px-5 py-4 sm:grid-cols-[6.5rem_1fr]">
                       <p class="font-medium tabular-nums text-muted">
                         {clock(visual.start)}–{clock(visual.end)}
                       </p>
-                      <div class="aspect-video w-36 overflow-hidden rounded-lg border border-border bg-bg">
-                        {src && asset?.mime.startsWith('video/') && (
-                          <video src={src} controls preload="metadata" class="size-full object-cover" />
-                        )}
-                        {src && asset?.mime.startsWith('image/') && (
-                          <img src={src} alt={visual.prompt} loading="lazy" class="size-full object-cover" />
-                        )}
-                      </div>
                       <div class="min-w-0">
                         <p class="font-medium">{VISUAL_LABELS[visual.type]}</p>
                         <p class="mt-1 text-muted">{visual.prompt}</p>
-                        {asset?.status === 'error' && <p class="mt-1 text-danger">{asset.error}</p>}
-                        {!asset && <p class="mt-1 text-muted">Pendiente de generar.</p>}
-                        {asset?.credit && <p class="mt-1 text-sm text-muted">Crédito: {asset.credit}</p>}
+                        <div class="mt-3 flex flex-wrap gap-3">
+                          {slotJobs.map((job) => {
+                            const asset = jobAsset(job);
+                            const src = asset?.status === 'done' ? urlByPath.get(asset.path) : undefined;
+                            const wide = job.format !== '9:16';
+                            return (
+                              <div class="w-fit">
+                                <div class:list={['overflow-hidden rounded-lg border border-border bg-bg', wide ? 'h-24 w-40' : 'h-40 w-24']}>
+                                  {src && asset?.mime.startsWith('video/') && (
+                                    <video src={src} controls preload="metadata" class="size-full object-cover" />
+                                  )}
+                                  {src && asset?.mime.startsWith('image/') && (
+                                    <img src={src} alt={visual.prompt} loading="lazy" class="size-full object-cover" />
+                                  )}
+                                </div>
+                                {job.format !== 'any' && formats.length > 1 && (
+                                  <p class="mt-1 text-xs text-muted">{FORMATS[job.format].label}</p>
+                                )}
+                                {asset?.status === 'error' && <p class="mt-1 max-w-40 text-sm text-danger">{asset.error}</p>}
+                                {!asset && <p class="mt-1 text-sm text-muted">Pendiente</p>}
+                                {asset?.credit && <p class="mt-1 max-w-40 text-xs text-muted">Crédito: {asset.credit}</p>}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     </li>
                   );
                 })}
               </ol>
 
+              <h3 class="mt-8 font-semibold">Formato y audio</h3>
+              <ul class="mt-2 space-y-1 text-muted">
+                <li>Formatos: {formats.map((f) => FORMATS[f].label).join(' y ')}.</li>
+                <li>Música: {tracks.find((t) => t.id === video.music_track_id)?.name ?? 'sin música'}.</li>
+                <li>Efectos de sonido: {video.sfx ? 'sí, se añaden al editar' : 'no'}.</li>
+              </ul>
+
               <h3 class="mt-8 font-semibold">Paquete para editar</h3>
               <p class="mt-1 max-w-prose text-muted">
-                Un ZIP con la voz, las imágenes, los clips, el guion con tiempos y las instrucciones. Ábrelo en Claude
-                para editar con Hyperframes o Remotion.
+                Un ZIP con la voz, la música, las imágenes de cada formato, los clips, el guion con tiempos, los
+                subtítulos ya acomodados y las instrucciones. Ábrelo en Claude para editar con Hyperframes o Remotion.
               </p>
               <div class="mt-3 flex flex-wrap items-center gap-3">
                 <a class={primary} href={`/api/videos/zip?video_id=${video.id}`} download>
@@ -549,7 +830,7 @@ const field =
           ) : (
             <p class="mt-2 max-w-prose text-muted">
               Aún no se generan. Cuando el guion esté aprobado y tengas visuales y voz, usa el botón “Generar contenidos”
-              de arriba. Se crea la voz, las imágenes de Gemini y se descargan los clips de Pixabay.
+              de arriba. Se crea la voz, las imágenes de Gemini (una por formato) y se descargan los clips de Pixabay.
             </p>
           )
         }
@@ -680,6 +961,48 @@ const field =
       }
     });
     refreshVisuals();
+
+    // ---- Formatos: siempre al menos uno ----
+    const formatBoxes = all<HTMLInputElement>('[data-format]');
+    for (const box of formatBoxes) {
+      box.addEventListener('change', () => {
+        if (!formatBoxes.some((b) => b.checked)) box.checked = true;
+      });
+    }
+
+    // ---- Audio: añadir música (subir o generar), vista previa y estados de carga ----
+    for (const tab of all<HTMLButtonElement>('[data-music-tab]')) {
+      tab.addEventListener('click', () => {
+        for (const other of all<HTMLButtonElement>('[data-music-tab]')) {
+          other.setAttribute('aria-pressed', String(other === tab));
+        }
+        for (const panel of all('[data-music-panel]')) panel.classList.toggle('hidden', panel.dataset.musicPanel !== tab.dataset.musicTab);
+      });
+    }
+    for (const form of all<HTMLFormElement>('[data-music-panel]')) {
+      form.addEventListener('submit', () => {
+        const button = form.querySelector<HTMLButtonElement>('[data-music-submit]');
+        if (button) {
+          button.disabled = true;
+          button.textContent = form.dataset.musicPanel === 'generate' ? 'Generando música… puede tardar' : 'Subiendo…';
+        }
+      });
+    }
+    const trackAudio = root.querySelector<HTMLAudioElement>('[data-track-audio]');
+    let playingTrack: HTMLElement | null = null;
+    if (trackAudio) {
+      trackAudio.addEventListener('pause', () => playingTrack && (playingTrack.dataset.playing = 'false'));
+      trackAudio.addEventListener('play', () => playingTrack && (playingTrack.dataset.playing = 'true'));
+      for (const button of all<HTMLButtonElement>('[data-track-play]')) {
+        button.addEventListener('click', () => {
+          if (playingTrack === button && !trackAudio.paused) return trackAudio.pause();
+          if (playingTrack) playingTrack.dataset.playing = 'false';
+          playingTrack = button;
+          if (trackAudio.getAttribute('src') !== button.dataset.url) trackAudio.src = button.dataset.url ?? '';
+          trackAudio.play().catch(() => (button.dataset.playing = 'false'));
+        });
+      }
+    }
 
     // ---- Voz: reproductor compartido, búsqueda y biblioteca ----
     const voiceInput = q<HTMLInputElement>('[data-voice-id]');

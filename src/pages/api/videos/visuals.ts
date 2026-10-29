@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { AiError } from '../../../lib/gemini';
 import { PROJECT_COLUMNS, isUuid, type Project } from '../../../lib/projects';
 import { planVisuals, type Scene } from '../../../lib/video-ai';
+import { isFormatId } from '../../../lib/video-format';
 import { parseVisualCounts } from '../../../lib/video-plan';
 import { canCreate } from '../../../lib/video-data';
 
@@ -28,6 +29,9 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
   const counts = parseVisualCounts(form);
   if (!counts) return back('error=counts');
 
+  const formats = [...new Set(form.getAll('formats').map(String).filter(isFormatId))];
+  if (!formats.length) return back('error=formats');
+
   const { data } = await supabase.from('projects').select(PROJECT_COLUMNS).eq('id', video.project_id).maybeSingle();
   const project = data as unknown as Project | null;
   if (!project) return new Response('No encontrado', { status: 404 });
@@ -39,7 +43,7 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
     return back(error instanceof AiError && error.code === 'config' ? 'error=config' : 'error=ai');
   }
 
-  const { error } = await supabase.from('videos').update({ visuals, generated_at: null }).eq('id', video.id);
+  const { error } = await supabase.from('videos').update({ visuals, formats, generated_at: null }).eq('id', video.id);
   if (error) {
     console.error('guardar visuales falló:', error.code, error.message);
     return back('error=save');

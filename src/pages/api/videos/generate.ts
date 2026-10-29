@@ -2,7 +2,8 @@ import type { APIRoute } from 'astro';
 import { VOICE_ID_RE, synthesize } from '../../../lib/elevenlabs';
 import { PROJECT_COLUMNS, isUuid, type Project } from '../../../lib/projects';
 import type { Scene, VisualSlot } from '../../../lib/video-ai';
-import { ASSET_BUCKET, generateAssets, type Asset } from '../../../lib/video-assets';
+import { ASSET_BUCKET, generateAssets, normalizeAssets } from '../../../lib/video-assets';
+import { isFormatId, type FormatId } from '../../../lib/video-format';
 import { canCreate } from '../../../lib/video-data';
 import { alignScenes, scaleVisuals } from '../../../lib/video-script';
 
@@ -25,7 +26,7 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
   const { supabase } = locals;
   const { data: video } = await supabase
     .from('videos')
-    .select('id, project_id, voice_id, script, visuals, script_approved, audio_path, assets')
+    .select('id, project_id, voice_id, script, visuals, script_approved, audio_path, assets, formats')
     .eq('id', videoId)
     .maybeSingle();
   if (!video) return new Response('No encontrado', { status: 404 });
@@ -76,12 +77,14 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
   }
 
   // 2. Imágenes y clips.
-  const assets: Asset[] = await generateAssets({
+  const formats = ((video.formats ?? []) as unknown[]).filter(isFormatId) as FormatId[];
+  const assets = await generateAssets({
     supabase,
     videoId: video.id,
     project,
     visuals,
-    existing: (video.assets ?? []) as Asset[],
+    formats: formats.length ? formats : ['9:16'],
+    existing: normalizeAssets(video.assets),
     force,
   });
 

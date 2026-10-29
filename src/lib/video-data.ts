@@ -26,3 +26,10 @@ export function json(body: unknown, status = 200) {
 }
 
 export const canCreate = (role: string | null) => role === 'admin' || role === 'editor';
+
+/** La pista de música elegida para un video (nombre y ruta), si hay. */
+export async function loadMusic(supabase: SupabaseClient, trackId: string | null) {
+  if (!trackId) return { music: null };
+  const { data } = await supabase.from('music_tracks').select('name, path').eq('id', trackId).maybeSingle();
+  return { music: data ? { name: data.name as string, path: data.path as string } : null };
+}

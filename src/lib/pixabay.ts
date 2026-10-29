@@ -9,7 +9,7 @@ interface PixabayHit {
   isLowQuality?: boolean;
   user?: string;
   pageURL?: string;
-  videos?: Record<string, { url?: string; size?: number } | undefined>;
+  videos?: Record<string, { url?: string; size?: number; width?: number; height?: number } | undefined>;
 }
 
 export type ClipResult = { ok: true; clip: Clip } | { ok: false; reason: 'config' | 'none' | 'request' };
@@ -31,8 +31,16 @@ async function search(key: string, query: string): Promise<PixabayHit[] | null> 
   }
 }
 
-/** Busca un clip de Pixabay para la escena: el de buena calidad que dure lo necesario, o el más largo. */
-export async function findClip(query: string, neededSeconds: number): Promise<ClipResult> {
+/** Busca un clip de Pixabay: buena calidad, de la orientación pedida y que dure lo necesario (o el más largo). */
+export type Orientation = 'portrait' | 'landscape';
+
+const orientationOf = (hit: PixabayHit): Orientation | null => {
+  const size = SIZES.find((s) => hit.videos?.[s]?.url);
+  const v = size ? hit.videos?.[size] : undefined;
+  return v?.width && v?.height ? (v.height > v.width ? 'portrait' : 'landscape') : null;
+};
+
+export async function findClip(query: string, neededSeconds: number, orientation: Orientation = 'landscape'): Promise<ClipResult> {
   const key = import.meta.env.PIXABAY_API_KEY;
   if (!key) return { ok: false, reason: 'config' };
 
@@ -44,8 +52,11 @@ export async function findClip(query: string, neededSeconds: number): Promise<Cl
     if (shorter && shorter !== query) hits = (await search(key, shorter)) ?? [];
   }
 
-  const usable = hits.filter((h) => !h.isLowQuality && SIZES.some((s) => h.videos?.[s]?.url));
-  if (!usable.length) return { ok: false, reason: 'none' };
+  const valid = hits.filter((h) => !h.isLowQuality && SIZES.some((s) => h.videos?.[s]?.url));
+  if (!valid.length) return { ok: false, reason: 'none' };
+  // Se prefieren los clips con la orientación del video; si no hay, sirve cualquiera (se recorta al editar).
+  const matching = valid.filter((h) => orientationOf(h) === orientation);
+  const usable = matching.length ? matching : valid;
 
   const longEnough = usable.filter((h) => (h.duration ?? 0) >= neededSeconds);
   const best = longEnough.length ? longEnough[0] : [...usable].sort((a, b) => (b.duration ?? 0) - (a.duration ?? 0))[0];

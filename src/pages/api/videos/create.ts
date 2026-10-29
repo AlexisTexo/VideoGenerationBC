@@ -57,9 +57,13 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
     linkedIdeaId = created?.id ?? null;
   }
 
+  // La música predeterminada de la biblioteca se aplica sola a cada video nuevo.
+  const { data: defaultTrack } = await supabase.from('music_tracks').select('id').eq('is_default', true).maybeSingle();
+
   const { data: video, error } = await supabase
     .from('videos')
     .insert({
+      ...(defaultTrack ? { music_track_id: defaultTrack.id } : {}),
       project_id: projectId,
       idea_id: linkedIdeaId,
       title: script.title,
