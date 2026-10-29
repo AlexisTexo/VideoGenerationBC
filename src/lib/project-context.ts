@@ -26,7 +26,7 @@ export function projectToContext(p: ProjectInput): string {
     ),
   );
   add(
-    'Voz',
+    'Voz (por defecto)',
     lines(
       line('Nombre de la voz', p.voice_name),
       line('ID de voz (ElevenLabs)', p.voice_id),
@@ -40,7 +40,7 @@ export function projectToContext(p: ProjectInput): string {
   add('Reglas (qué sí y qué no)', p.rules);
   add('Llamado a la acción', p.call_to_action);
   add(
-    'Subtítulos',
+    'Subtítulos (por defecto)',
     lines(
       line('Tipografía', p.subtitle_font),
       line('Posición', label(SUBTITLE_POSITIONS, p.subtitle_position)),
@@ -51,7 +51,7 @@ export function projectToContext(p: ProjectInput): string {
     ),
   );
   add(
-    'Salida',
+    'Salida (por defecto)',
     lines(
       line('Plataformas', p.platforms.map((v) => label(PLATFORMS, v)).join(', ')),
       line('Formato por defecto', label(ASPECTS, p.default_aspect)),

@@ -14,18 +14,19 @@ if (!id || !isUuid(id)) {
   return new Response('No encontrado', { status: 404 });
 }
 
-const { data } = await supabase.from('projects').select(PROJECT_COLUMNS).eq('id', id).maybeSingle();
+const { data, error: loadError } = await supabase.from('projects').select(PROJECT_COLUMNS).eq('id', id).maybeSingle();
+if (loadError) {
+  console.error('cargar proyecto falló:', loadError.code, loadError.message);
+  return new Response('No se pudo cargar el proyecto. Revisa que las migraciones estén aplicadas.', { status: 500 });
+}
 const project = data as unknown as Project | null;
 if (!project) {
   return new Response('No encontrado', { status: 404 });
 }
 
+const nav = [...SECTIONS.map((s) => ({ id: s.id as string, label: s.label })), { id: 'contexto', label: 'Contexto' }];
 const requested = Astro.url.searchParams.get('section');
-const showContext = requested === 'contexto';
-const current = SECTIONS.find((s) => s.id === requested) ?? SECTIONS[0];
-
-const nav = [...SECTIONS.map((s) => ({ id: s.id, label: s.label })), { id: 'contexto', label: 'Contexto' }];
-const activeId = showContext ? 'contexto' : current.id;
+const activeId = nav.some((n) => n.id === requested) ? (requested as string) : SECTIONS[0].id;
 
 const saved = Astro.url.searchParams.get('ok') === '1';
 const error = Astro.url.searchParams.get('error');
@@ -34,7 +35,7 @@ const errorMessages: Record<string, string> = {
   logo: 'El logo debe ser PNG, JPG o WebP de máximo 2 MB.',
 };
 
-const context = showContext ? projectToContext(project) : '';
+const context = projectToContext(project);
 ---
 
 <Base title={`${project.name} · VideoGeneratorBC`}>
@@ -53,20 +54,16 @@ const context = showContext ? projectToContext(project) : '';
     </p>
 
     <div class="mt-10 grid gap-8 md:grid-cols-[13rem_minmax(0,1fr)]">
-      <nav aria-label="Secciones del proyecto" class="md:sticky md:top-6 md:self-start">
+      <nav aria-label="Secciones del proyecto" data-section-nav class="md:sticky md:top-6 md:self-start">
         <ul class="-mx-4 flex gap-1 overflow-x-auto px-4 md:mx-0 md:flex-col md:overflow-visible md:px-0">
           {
             nav.map((item) => (
               <li class="shrink-0">
                 <a
                   href={`/projects/${project.id}?section=${item.id}`}
+                  data-section={item.id}
                   aria-current={item.id === activeId ? 'page' : undefined}
-                  class:list={[
-                    'flex h-11 items-center whitespace-nowrap rounded-lg px-3 transition-colors',
-                    item.id === activeId
-                      ? 'border border-border bg-surface font-semibold'
-                      : 'border border-transparent text-muted hover:text-text',
-                  ]}
+                  class="flex h-11 items-center whitespace-nowrap rounded-lg border border-transparent px-3 text-muted transition-colors hover:text-text aria-[current=page]:border-border aria-[current=page]:bg-surface aria-[current=page]:font-semibold aria-[current=page]:text-text"
                 >
                   {item.label}
                 </a>
@@ -77,79 +74,120 @@ const context = showContext ? projectToContext(project) : '';
       </nav>
 
       <div class="min-w-0">
-        {saved && <p role="status" class="mb-6 text-ok">Cambios guardados.</p>}
+        {saved && <p role="status" data-flash class="mb-6 text-ok">Cambios guardados.</p>}
         {
           error && (
-            <p role="alert" class="mb-6 text-danger">
+            <p role="alert" data-flash class="mb-6 text-danger">
               {errorMessages[error] ?? 'No se pudieron guardar los cambios.'}
             </p>
           )
         }
 
         {
-          showContext ? (
-            <section>
-              <h2 class="text-2xl font-semibold tracking-tight">Contexto</h2>
-              <p class="mt-2 text-muted">
-                Así se ve este proyecto como documento. Es lo que recibe la IA al generar ideas y guiones, y viaja como
-                brief en el paquete de cada video.
-              </p>
-              <div class="mt-6 rounded-2xl border border-border bg-surface p-5">
-                <pre
-                  id="context-text"
-                  class="whitespace-pre-wrap break-words font-sans text-base leading-relaxed">{context}</pre>
-              </div>
-              <button
-                type="button"
-                id="copy-context"
-                class="mt-6 h-12 rounded-lg border border-border bg-surface px-6 text-base font-semibold transition-[background-color,transform] hover:bg-bg active:scale-[0.98]"
-              >
-                Copiar contexto
-              </button>
-            </section>
-          ) : (
-            <form method="post" action="/api/projects/update" enctype="multipart/form-data">
-              <input type="hidden" name="id" value={project.id} />
-              <input type="hidden" name="section" value={current.id} />
-              <fieldset disabled={!canEdit}>
-                <h2 class="text-2xl font-semibold tracking-tight">{current.title}</h2>
-                <p class="mt-2 text-muted">{current.description}</p>
-                <div class="mt-8">
-                  <ProjectSection section={current.id} project={project} />
-                </div>
-              </fieldset>
+          SECTIONS.map((s) => (
+            <section data-panel={s.id} hidden={s.id !== activeId}>
+              <form method="post" action="/api/projects/update" enctype="multipart/form-data">
+                <input type="hidden" name="id" value={project.id} />
+                <input type="hidden" name="section" value={s.id} />
+                <fieldset disabled={!canEdit}>
+                  <h2 class="text-2xl font-semibold tracking-tight">{s.title}</h2>
+                  <p class="mt-2 text-muted">{s.description}</p>
+                  <div class="mt-8">
+                    <ProjectSection section={s.id} project={project} />
+                  </div>
+                </fieldset>
 
-              <div class="mt-10">
-                {canEdit ? (
-                  <button
-                    type="submit"
-                    class="h-12 w-full rounded-lg bg-accent px-6 text-base font-semibold text-accent-fg transition-[background-color,transform] hover:bg-accent-hover active:scale-[0.98] sm:w-auto"
-                  >
-                    Guardar {current.label.toLowerCase()}
-                  </button>
-                ) : (
-                  <p class="text-muted">Tu rol solo permite ver este proyecto.</p>
-                )}
-              </div>
-            </form>
-          )
+                <div class="mt-10">
+                  {canEdit ? (
+                    <button
+                      type="submit"
+                      class="h-12 w-full rounded-lg bg-accent px-6 text-base font-semibold text-accent-fg transition-[background-color,transform] hover:bg-accent-hover active:scale-[0.98] sm:w-auto"
+                    >
+                      Guardar {s.label.toLowerCase()}
+                    </button>
+                  ) : (
+                    <p class="text-muted">Tu rol solo permite ver este proyecto.</p>
+                  )}
+                </div>
+              </form>
+            </section>
+          ))
         }
+
+        <section data-panel="contexto" hidden={activeId !== 'contexto'}>
+          <h2 class="text-2xl font-semibold tracking-tight">Contexto</h2>
+          <p class="mt-2 text-muted">
+            Así se ve este proyecto como documento. Es lo que recibe la IA al generar ideas y guiones, y viaja como
+            brief en el paquete de cada video.
+          </p>
+          <div class="mt-6 rounded-2xl border border-border bg-surface p-5">
+            <pre
+              id="context-text"
+              class="whitespace-pre-wrap break-words font-sans text-base leading-relaxed">{context}</pre>
+          </div>
+          <button
+            type="button"
+            id="copy-context"
+            class="mt-6 h-12 rounded-lg border border-border bg-surface px-6 text-base font-semibold transition-[background-color,transform] hover:bg-bg active:scale-[0.98]"
+          >
+            Copiar contexto
+          </button>
+        </section>
       </div>
     </div>
   </main>
 </Base>
 
 <script>
-  const button = document.getElementById('copy-context');
-  const source = document.getElementById('context-text');
+  // Cambio de sección sin recargar: todos los paneles ya están en la página.
+  const nav = document.querySelector('[data-section-nav]');
 
-  button?.addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(source?.textContent ?? '');
-      button.textContent = 'Copiado';
-    } catch {
-      button.textContent = 'No se pudo copiar';
+  if (nav) {
+    const panels = [...document.querySelectorAll<HTMLElement>('[data-panel]')];
+    const links = [...nav.querySelectorAll<HTMLAnchorElement>('a[data-section]')];
+
+    const show = (id: string) => {
+      if (!panels.some((p) => p.dataset.panel === id)) return;
+      for (const panel of panels) {
+        const active = panel.dataset.panel === id;
+        panel.hidden = !active;
+        panel.classList.remove('panel-in');
+        if (active) {
+          void panel.offsetWidth; // reinicia la animación
+          panel.classList.add('panel-in');
+        }
+      }
+      for (const link of links) {
+        if (link.dataset.section === id) link.setAttribute('aria-current', 'page');
+        else link.removeAttribute('aria-current');
+      }
+    };
+
+    for (const link of links) {
+      link.addEventListener('click', (event) => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+        event.preventDefault();
+        const id = link.dataset.section ?? '';
+        document.querySelectorAll('[data-flash]').forEach((el) => el.remove());
+        history.pushState({ section: id }, '', `?section=${id}`);
+        show(id);
+        link.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+      });
     }
-    setTimeout(() => (button.textContent = 'Copiar contexto'), 2000);
+
+    window.addEventListener('popstate', () => {
+      show(new URLSearchParams(location.search).get('section') ?? 'producto');
+    });
+  }
+
+  const copy = document.getElementById('copy-context');
+  copy?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(document.getElementById('context-text')?.textContent ?? '');
+      copy.textContent = 'Copiado';
+    } catch {
+      copy.textContent = 'No se pudo copiar';
+    }
+    setTimeout(() => (copy.textContent = 'Copiar contexto'), 2000);
   });
 </script>

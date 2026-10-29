@@ -31,7 +31,12 @@ export const ASPECTS = [
 export const SECTIONS = [
   { id: 'producto', label: 'Producto', title: 'Datos del producto', description: 'Cómo se llama y qué es.' },
   { id: 'marca', label: 'Marca', title: 'Marca', description: 'Colores que usarán los videos, imágenes y portadas.' },
-  { id: 'voz', label: 'Voz', title: 'Voz', description: 'Cómo suena la narración de los videos.' },
+  {
+    id: 'voz',
+    label: 'Voz',
+    title: 'Voz por defecto',
+    description: 'Cómo suena la narración por defecto. Cada video puede usar otra voz.',
+  },
   {
     id: 'contenido',
     label: 'Contenido',
@@ -41,10 +46,15 @@ export const SECTIONS = [
   {
     id: 'subtitulos',
     label: 'Subtítulos',
-    title: 'Subtítulos',
-    description: 'Estilo del texto que aparece sobre el video.',
+    title: 'Subtítulos por defecto',
+    description: 'Estilo inicial del texto sobre el video. Cada video puede ajustarlo.',
   },
-  { id: 'salida', label: 'Salida', title: 'Salida', description: 'Dónde se publican los videos y en qué formato.' },
+  {
+    id: 'salida',
+    label: 'Salida',
+    title: 'Salida por defecto',
+    description: 'Plataformas y formato con los que arranca cada video nuevo. Cada video puede cambiarlos.',
+  },
   {
     id: 'conocimiento',
     label: 'Conocimiento',

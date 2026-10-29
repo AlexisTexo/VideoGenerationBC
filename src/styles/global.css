@@ -86,8 +86,25 @@ body {
   animation-delay: calc(var(--i, 0) * 70ms);
 }
 
+/* Cambio de panel: aparece con un fundido corto. */
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.panel-in {
+  animation: panel-in 0.22s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .rise {
+  .rise,
+  .panel-in {
     animation: none;
   }
 }
