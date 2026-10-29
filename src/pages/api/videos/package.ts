@@ -15,7 +15,7 @@ export const GET: APIRoute = async ({ url, locals }) => {
   const { supabase } = locals;
   const { data: video } = await supabase
     .from('videos')
-    .select('title, idea, voice_id, voice_name, target_seconds, audio_seconds, script, visuals, words, project_id')
+    .select('title, idea, voice_id, voice_name, target_seconds, audio_seconds, script, visuals, words, assets, project_id')
     .eq('id', videoId)
     .maybeSingle();
   if (!video) return new Response('No encontrado', { status: 404 });
@@ -25,7 +25,7 @@ export const GET: APIRoute = async ({ url, locals }) => {
   if (!project) return new Response('No encontrado', { status: 404 });
 
   const packaged = video as unknown as PackageVideo;
-  const body = file === 'timeline.json' ? JSON.stringify(buildTimeline(project, packaged), null, 2) : buildBrief(project, packaged);
+  const body = file === 'timeline.json' ? JSON.stringify(buildTimeline(project, packaged, videoId), null, 2) : buildBrief(project, packaged, videoId);
 
   return new Response(body, {
     headers: {

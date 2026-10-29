@@ -8,6 +8,9 @@ interface ImportMetaEnv {
   /** Solo servidor. */
   readonly GEMINI_API_KEY: string;
   readonly GEMINI_MODEL?: string;
+  readonly GEMINI_IMAGE_MODEL?: string;
+  /** Solo servidor. */
+  readonly PIXABAY_API_KEY: string;
   /** Solo servidor. */
   readonly ELEVENLABS_API_KEY: string;
   readonly ELEVENLABS_MODEL?: string;

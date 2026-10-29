@@ -6,6 +6,7 @@ import Stepper from '../../../../components/Stepper.astro';
 import VoiceItem from '../../../../components/VoiceItem.astro';
 import { isUuid } from '../../../../lib/projects';
 import { VISUAL_LABELS, type Scene, type VisualSlot } from '../../../../lib/video-ai';
+import type { Asset } from '../../../../lib/video-assets';
 import { LIMITS, recommendedVisuals } from '../../../../lib/video-plan';
 import { canCreate } from '../../../../lib/video-data';
 import { VOICE_COLUMNS, type Voice } from '../../../../lib/voices';
@@ -21,7 +22,7 @@ if (!id || !videoId || !isUuid(id) || !isUuid(videoId)) {
 const { data: video, error } = await supabase
   .from('videos')
   .select(
-    'id, title, idea, voice_id, voice_name, target_seconds, script, visuals, script_approved, audio_path, audio_seconds, generated_at, project:projects(id, name, logo_url)',
+    'id, title, idea, voice_id, voice_name, target_seconds, script, visuals, script_approved, audio_path, audio_seconds, generated_at, assets, project:projects(id, name, logo_url)',
   )
   .eq('id', videoId)
   .eq('project_id', id)
@@ -46,6 +47,13 @@ const { data: signed } = video.audio_path
   : { data: null };
 const audioUrl = signed?.signedUrl ?? '';
 
+const assets = (video.assets ?? []) as Asset[];
+const donePaths = assets.filter((a) => a.status === 'done').map((a) => a.path);
+const { data: signedAssets } = donePaths.length
+  ? await supabase.storage.from('video-assets').createSignedUrls(donePaths, 3600)
+  : { data: [] };
+const urlByPath = new Map((signedAssets ?? []).map((a) => [a.path ?? '', a.signedUrl]));
+
 const project = video.project as unknown as { id: string; name: string; logo_url: string };
 const scenes = video.script as Scene[];
 const visuals = video.visuals as VisualSlot[];
@@ -66,6 +74,10 @@ const okMessages: Record<string, string> = {
   saved: 'Guion guardado. Apruébalo para poder generar los contenidos.',
   approved: 'Guion aprobado.',
   generated: 'Contenidos generados.',
+  partial:
+    Astro.url.searchParams.get('failed') === '1'
+      ? 'Contenidos generados, pero 1 no se pudo generar. Revisa la lista y pulsa “Completar contenidos” para reintentar.'
+      : `Contenidos generados, pero ${Astro.url.searchParams.get('failed') ?? 'algunos'} no se pudieron generar. Revisa la lista y pulsa “Completar contenidos” para reintentar.`,
 };
 const problem = Astro.url.searchParams.get('error');
 const errorMessages: Record<string, string> = {
@@ -97,6 +109,13 @@ const done: Record<string, boolean> = {
 };
 const ready = done.guion && done.visuales && done.voz;
 const generated = Boolean(video.generated_at);
+const assetFor = (i: number) => {
+  const asset = assets[i];
+  return asset && asset.type === visuals[i]?.type && asset.prompt === visuals[i]?.prompt ? asset : null;
+};
+const failedCount = visuals.filter((_, i) => assetFor(i)?.status === 'error').length;
+const missingCount = visuals.filter((_, i) => !assetFor(i)).length;
+const incomplete = generated && (failedCount > 0 || missingCount > 0);
 
 const clock = (seconds: number) => {
   const m = Math.floor(seconds / 60);
@@ -149,13 +168,23 @@ const field =
           }
         </ul>
         {
-          canEdit && ready && (
+          canEdit && ready && (!generated || incomplete) && (
             <form method="post" action="/api/videos/generate" data-generate-form>
               <input type="hidden" name="video_id" value={video.id} />
               <button type="submit" class={primary} data-generate>
-                {generated ? 'Volver a generar contenidos' : 'Generar contenidos'}
+                {generated ? 'Completar contenidos' : 'Generar contenidos'}
               </button>
             </form>
+          )
+        }
+        {
+          ready && generated && !incomplete && (
+            <p class="flex items-center gap-2 font-medium">
+              <svg viewBox="0 0 24 24" class="size-5 text-ok" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+              Contenidos listos
+            </p>
           )
         }
       </div>
@@ -447,7 +476,7 @@ const field =
           generated ? (
             <>
               <p class="mt-2 max-w-prose text-muted">
-                La voz está lista y el guion y los visuales ya usan sus tiempos reales: {video.audio_seconds} segundos.
+                La voz dura {video.audio_seconds} segundos y el guion y los visuales ya usan esos tiempos.
               </p>
 
               <h3 class="mt-8 font-semibold">Voz</h3>
@@ -457,31 +486,70 @@ const field =
                 <p class="mt-3 text-muted">No se pudo cargar el audio. Recarga la página.</p>
               )}
 
+              <h3 class="mt-8 font-semibold">
+                Imágenes y videos <span class="font-normal text-muted tabular-nums">({visuals.length - failedCount - missingCount} de {visuals.length})</span>
+              </h3>
+              <ol class="mt-3 divide-y divide-border rounded-2xl border border-border bg-surface">
+                {visuals.map((visual, i) => {
+                  const asset = assetFor(i);
+                  const src = asset?.status === 'done' ? urlByPath.get(asset.path) : undefined;
+                  return (
+                    <li class="grid gap-3 px-5 py-4 sm:grid-cols-[6.5rem_9rem_1fr]">
+                      <p class="font-medium tabular-nums text-muted">
+                        {clock(visual.start)}–{clock(visual.end)}
+                      </p>
+                      <div class="aspect-video w-36 overflow-hidden rounded-lg border border-border bg-bg">
+                        {src && asset?.mime.startsWith('video/') && (
+                          <video src={src} controls preload="metadata" class="size-full object-cover" />
+                        )}
+                        {src && asset?.mime.startsWith('image/') && (
+                          <img src={src} alt={visual.prompt} loading="lazy" class="size-full object-cover" />
+                        )}
+                      </div>
+                      <div class="min-w-0">
+                        <p class="font-medium">{VISUAL_LABELS[visual.type]}</p>
+                        <p class="mt-1 text-muted">{visual.prompt}</p>
+                        {asset?.status === 'error' && <p class="mt-1 text-danger">{asset.error}</p>}
+                        {!asset && <p class="mt-1 text-muted">Pendiente de generar.</p>}
+                        {asset?.credit && <p class="mt-1 text-sm text-muted">Crédito: {asset.credit}</p>}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+
               <h3 class="mt-8 font-semibold">Paquete para editar</h3>
-              <p class="mt-1 text-muted">Descarga estos archivos y ábrelos en Claude para editar con Hyperframes o Remotion.</p>
-              <div class="mt-3 flex flex-wrap gap-3">
-                <a
-                  class={secondary}
-                  href={`/api/videos/package?video_id=${video.id}&file=timeline.json`}
-                  download="timeline.json"
-                >
+              <p class="mt-1 max-w-prose text-muted">
+                Un ZIP con la voz, las imágenes, los clips, el guion con tiempos y las instrucciones. Ábrelo en Claude
+                para editar con Hyperframes o Remotion.
+              </p>
+              <div class="mt-3 flex flex-wrap items-center gap-3">
+                <a class={primary} href={`/api/videos/zip?video_id=${video.id}`} download>
+                  Descargar paquete (ZIP)
+                </a>
+                <a class="text-muted underline underline-offset-4 hover:text-text" href={`/api/videos/package?video_id=${video.id}&file=timeline.json`} download="timeline.json">
                   timeline.json
                 </a>
-                <a class={secondary} href={`/api/videos/package?video_id=${video.id}&file=brief.md`} download="brief.md">
+                <a class="text-muted underline underline-offset-4 hover:text-text" href={`/api/videos/package?video_id=${video.id}&file=brief.md`} download="brief.md">
                   brief.md
                 </a>
               </div>
 
-              <h3 class="mt-8 font-semibold">Pendiente de generar</h3>
-              <ul class="mt-2 space-y-1 text-muted">
-                <li>{imageCount} {imageCount === 1 ? 'imagen' : 'imágenes'} con IA: el plan está listo, aún no se genera{imageCount === 1 ? '' : 'n'}.</li>
-                <li>{clipCount} {clipCount === 1 ? 'video' : 'videos'} de stock: el plan está listo, aún no se descarga{clipCount === 1 ? '' : 'n'}.</li>
-              </ul>
+              {canEdit && ready && (
+                <form method="post" action="/api/videos/generate" class="mt-10 border-t border-border pt-6" data-generate-form>
+                  <input type="hidden" name="video_id" value={video.id} />
+                  <input type="hidden" name="force" value="1" />
+                  <button type="submit" class={secondary} data-generate>Rehacer todo</button>
+                  <p class="mt-2 text-sm text-muted">
+                    Vuelve a generar la voz, las imágenes y los clips. Gasta créditos de ElevenLabs y Gemini otra vez.
+                  </p>
+                </form>
+              )}
             </>
           ) : (
             <p class="mt-2 max-w-prose text-muted">
               Aún no se generan. Cuando el guion esté aprobado y tengas visuales y voz, usa el botón “Generar contenidos”
-              de arriba.
+              de arriba. Se crea la voz, las imágenes de Gemini y se descargan los clips de Pixabay.
             </p>
           )
         }
@@ -566,13 +634,15 @@ const field =
     document.fonts?.ready.then(refit);
 
     // ---- Generar contenidos ----
-    root.querySelector('[data-generate-form]')?.addEventListener('submit', () => {
-      const button = root.querySelector<HTMLButtonElement>('[data-generate]');
-      if (button) {
-        button.disabled = true;
-        button.textContent = 'Generando la voz…';
-      }
-    });
+    for (const form of all<HTMLFormElement>('[data-generate-form]')) {
+      form.addEventListener('submit', () => {
+        const button = form.querySelector<HTMLButtonElement>('[data-generate]');
+        if (button) {
+          button.disabled = true;
+          button.textContent = 'Generando… puede tardar un minuto';
+        }
+      });
+    }
 
     // ---- Visuales ----
     const images = q<HTMLInputElement>('#images');

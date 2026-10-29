@@ -39,7 +39,7 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
     return back(error instanceof AiError && error.code === 'config' ? 'error=config' : 'error=ai');
   }
 
-  const { error } = await supabase.from('videos').update({ visuals }).eq('id', video.id);
+  const { error } = await supabase.from('videos').update({ visuals, generated_at: null }).eq('id', video.id);
   if (error) {
     console.error('guardar visuales falló:', error.code, error.message);
     return back('error=save');
