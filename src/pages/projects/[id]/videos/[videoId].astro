@@ -190,13 +190,23 @@ const field =
               />
             </div>
             <div class="mt-6 rounded-xl border border-border bg-surface p-4">
-              <p class="font-medium" data-visuals-total aria-live="polite"></p>
+              <p class="text-lg font-semibold" data-visuals-total aria-live="polite"></p>
+              <dl class="mt-3 grid grid-cols-2 divide-x divide-border">
+                <div class="pr-4">
+                  <dt class="text-sm text-muted">Imágenes</dt>
+                  <dd class="text-2xl font-semibold tabular-nums" data-count-images>0</dd>
+                </div>
+                <div class="pl-4">
+                  <dt class="text-sm text-muted">Videos</dt>
+                  <dd class="text-2xl font-semibold tabular-nums" data-count-clips>0</dd>
+                </div>
+              </dl>
               <button
                 type="button"
                 data-use-recommended
                 data-images={recommended.images}
                 data-clips={recommended.clips}
-                class="mt-1 font-medium text-link underline underline-offset-4"
+                class="mt-4 text-sm italic text-text no-underline transition-opacity duration-150 ease-out hover:opacity-70"
               >
                 Usar lo recomendado ({recommended.images} imágenes y {recommended.clips} videos)
               </button>
@@ -396,10 +406,12 @@ const field =
       const total = a + b;
       const valid = total >= 1 && total <= LIMITS.maxVisuals;
       totalLabel.textContent = valid
-        ? `${total} visuales: ${a} imágenes y ${b} videos.`
+        ? `${total} ${total === 1 ? 'visual' : 'visuales'} en total`
         : total < 1
           ? 'Elige al menos una imagen o un video.'
           : `Máximo ${LIMITS.maxVisuals} visuales en total.`;
+      q('[data-count-images]').textContent = String(a);
+      q('[data-count-clips]').textContent = String(b);
       totalLabel.classList.toggle('text-danger', !valid);
       if (visualsSubmit) visualsSubmit.disabled = !valid;
     };
