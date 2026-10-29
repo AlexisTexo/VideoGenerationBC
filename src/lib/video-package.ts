@@ -36,15 +36,17 @@ export function visualFiles(video: PackageVideo, videoId: string) {
   return video.visuals.map((slot, i) => {
     const files: Record<string, string> = {};
     let credit: string | null = null;
+    let orientation: string | null = null;
     const wanted = slot.type === 'pexels_clip' ? (['any'] as const) : formatsOf(video);
     for (const format of wanted) {
       const asset = assetFor(video.assets, i, slot, format === 'any' ? '9:16' : format);
       if (asset?.status === 'done') {
         files[format] = packageName(asset.path, videoId);
         credit = asset.credit ?? credit;
+        orientation = asset.orientation ?? orientation;
       }
     }
-    return { files, credit };
+    return { files, credit, orientation };
   });
 }
 
@@ -105,7 +107,7 @@ Edita este video con Hyperframes o Remotion. Los datos exactos están en \`timel
 
 ## Formatos a entregar
 ${formatLines}
-Entrega un render por formato. Las imágenes ya vienen generadas para cada formato; los clips de stock sirven para todos y se recortan al encuadre.
+Entrega un render por formato. Las imágenes ya vienen generadas para cada formato; los clips de stock sirven para todos: si su orientación (\`orientation\`) no coincide con el formato, recórtalos con encuadre centrado (\`object-fit: cover\`).
 
 ## Qué hacer
 - Duración total: ${video.audio_seconds ?? video.target_seconds} s, que es lo que dura la voz (\`voiceover.mp3\`).

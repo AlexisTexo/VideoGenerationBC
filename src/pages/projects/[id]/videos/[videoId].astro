@@ -88,6 +88,7 @@ const okMessages: Record<string, string> = {
   saved: 'Guion guardado. Apruébalo para poder generar los contenidos.',
   approved: 'Guion aprobado.',
   voice: 'Voz elegida y guardada en tu biblioteca.',
+  remade: 'Listo: elemento rehecho.',
   generated: 'Contenidos generados.',
   audio: 'Audio guardado.',
   music: 'Música guardada en tu biblioteca.',
@@ -115,6 +116,8 @@ const errorMessages: Record<string, string> = {
   voice_request: 'No se pudo generar la voz. Intenta de nuevo.',
   align: 'La voz se generó, pero no se pudieron ajustar los tiempos.',
   upload: 'No se pudo guardar el audio. Revisa que la migración 0009 esté aplicada.',
+  remake: 'No se pudo rehacer: ese elemento ya no está en el plan de visuales.',
+  remake_failed: `No se pudo rehacer${Astro.url.searchParams.get('detail') ? `: ${Astro.url.searchParams.get('detail')}` : ''}. Se conservó el anterior si existía.`,
   formats: 'Elige al menos un formato: vertical 9:16 u horizontal 16:9.',
   music_file: 'El archivo debe ser un audio válido (MP3, WAV, M4A u OGG).',
   music_size: 'La música pesa demasiado: máximo 15 MB.',
@@ -761,7 +764,7 @@ const field =
                 {visuals.map((visual, i) => {
                   const slotJobs = jobs.filter((j) => j.index === i);
                   return (
-                    <li class="grid gap-3 px-5 py-4 sm:grid-cols-[6.5rem_1fr]">
+                    <li id={`visual-${i}`} class="grid scroll-mt-24 gap-3 px-5 py-4 sm:grid-cols-[6.5rem_1fr]">
                       <p class="font-medium tabular-nums text-muted">
                         {clock(visual.start)}–{clock(visual.end)}
                       </p>
@@ -789,6 +792,25 @@ const field =
                                 {asset?.status === 'error' && <p class="mt-1 max-w-40 text-sm text-danger">{asset.error}</p>}
                                 {!asset && <p class="mt-1 text-sm text-muted">Pendiente</p>}
                                 {asset?.credit && <p class="mt-1 max-w-40 text-xs text-muted">Crédito: {asset.credit}</p>}
+                                {asset?.status === 'done' && asset.orientation && !formats.some((f) => (f === '9:16') === (asset.orientation === 'portrait')) && (
+                                  <p class="mt-1 max-w-40 text-xs text-muted">
+                                    Clip {asset.orientation === 'portrait' ? 'vertical' : 'horizontal'}: se recorta al formato al editar.
+                                  </p>
+                                )}
+                                {canEdit && (
+                                  <form method="post" action="/api/videos/regenerate" class="mt-2" data-remake-form>
+                                    <input type="hidden" name="video_id" value={video.id} />
+                                    <input type="hidden" name="index" value={i} />
+                                    <input type="hidden" name="format" value={job.format} />
+                                    <button
+                                      type="submit"
+                                      class="h-9 rounded-lg border border-border bg-bg px-3 text-sm font-medium transition-[background-color,transform] duration-150 ease-out hover:bg-surface active:scale-[0.97] disabled:opacity-50"
+                                      data-remake
+                                    >
+                                      {!asset || asset.status === 'error' ? 'Generar' : visual.type === 'pexels_clip' ? 'Otro clip' : 'Rehacer'}
+                                    </button>
+                                  </form>
+                                )}
                               </div>
                             );
                           })}
@@ -920,6 +942,17 @@ const field =
     document.addEventListener('video:panel', refit);
     window.addEventListener('resize', refit);
     document.fonts?.ready.then(refit);
+
+    // ---- Rehacer un elemento: solo se bloquea ese botón ----
+    for (const form of all<HTMLFormElement>('[data-remake-form]')) {
+      form.addEventListener('submit', () => {
+        const button = form.querySelector<HTMLButtonElement>('[data-remake]');
+        if (button) {
+          button.disabled = true;
+          button.textContent = 'Rehaciendo…';
+        }
+      });
+    }
 
     // ---- Generar contenidos ----
     for (const form of all<HTMLFormElement>('[data-generate-form]')) {

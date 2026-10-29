@@ -20,6 +20,9 @@ export interface Asset {
   mime: string;
   prompt: string;
   credit?: string;
+  /** Orientación real del clip y su página de origen (para no repetirlo al pedir otro). */
+  orientation?: Orientation;
+  source?: string;
   error?: string;
 }
 
@@ -88,10 +91,11 @@ function imagePrompt(project: ProjectInput, slot: VisualSlot, format: FormatId):
     .join(' ');
 }
 
-async function upload(supabase: SupabaseClient, path: string, bytes: Uint8Array, mime: string): Promise<boolean> {
+/** Sube un archivo a Storage; devuelve el motivo si falla. */
+async function upload(supabase: SupabaseClient, path: string, bytes: Uint8Array, mime: string): Promise<string | null> {
   const { error } = await supabase.storage.from(ASSET_BUCKET).upload(path, bytes, { contentType: mime, upsert: true });
   if (error) console.error('subir archivo falló:', path, error.message);
-  return !error;
+  return error ? error.message : null;
 }
 
 async function makeAsset(
@@ -102,6 +106,7 @@ async function makeAsset(
   index: number,
   format: FormatId | 'any',
   orientation: Orientation,
+  avoid: string[] = [],
 ): Promise<Asset> {
   const base = { index, format, type: slot.type, prompt: slot.prompt, mime: '', path: '' };
   const fail = (error: string): Asset => ({ ...base, status: 'error', error });
@@ -110,7 +115,8 @@ async function makeAsset(
     try {
       const image = await generateImage(imagePrompt(project, slot, format), format);
       const path = `${videoId}/assets/${FORMATS[format].dir}/${pad(index + 1)}.${EXTENSIONS[image.mime]}`;
-      if (!(await upload(supabase, path, image.bytes, image.mime))) return fail('No se pudo guardar la imagen.');
+      const uploadError = await upload(supabase, path, image.bytes, image.mime);
+      if (uploadError) return fail(`No se pudo guardar la imagen: ${uploadError}`);
       return { ...base, status: 'done', path, mime: image.mime };
     } catch (error) {
       if (error instanceof AiError) {
@@ -120,21 +126,30 @@ async function makeAsset(
     }
   }
 
-  const found = await findClip(slot.prompt, slot.end - slot.start, orientation);
+  const found = await findClip(slot.prompt, slot.end - slot.start, orientation, avoid);
   if (!found.ok) {
     return fail(
       found.reason === 'config'
         ? 'Falta PIXABAY_API_KEY en el .env.'
         : found.reason === 'none'
-          ? `Pixabay no encontró clips para “${slot.prompt}”.`
+          ? `Pixabay no encontró (más) clips para “${slot.prompt}”.`
           : 'No se pudo consultar Pixabay.',
     );
   }
   const bytes = await downloadClip(found.clip.url);
   if (!bytes) return fail('No se pudo descargar el clip.');
   const path = `${videoId}/assets/clips/${pad(index + 1)}.mp4`;
-  if (!(await upload(supabase, path, bytes, 'video/mp4'))) return fail('No se pudo guardar el clip.');
-  return { ...base, status: 'done', path, mime: 'video/mp4', credit: found.clip.credit };
+  const clipError = await upload(supabase, path, bytes, 'video/mp4');
+  if (clipError) return fail(`No se pudo guardar el clip: ${clipError}`);
+  return {
+    ...base,
+    status: 'done',
+    path,
+    mime: 'video/mp4',
+    credit: found.clip.credit,
+    orientation: found.clip.orientation,
+    source: found.clip.source,
+  };
 }
 
 /** Ejecuta tareas con un máximo de llamadas a la vez. */
@@ -152,6 +167,28 @@ async function pool<T, R>(items: T[], limit: number, work: (item: T, index: numb
   return results;
 }
 
+/** Solo vertical: clips verticales. Con horizontal (solo o junto al vertical): clips horizontales. */
+export const clipOrientation = (formats: FormatId[]): Orientation =>
+  formats.length === 1 && formats[0] === '9:16' ? 'portrait' : 'landscape';
+
+/**
+ * Rehace un solo elemento (imagen de un formato o clip). En un clip, evita repetir el que ya tenía.
+ */
+export async function remakeAsset(options: {
+  supabase: SupabaseClient;
+  videoId: string;
+  project: ProjectInput;
+  slot: VisualSlot;
+  index: number;
+  format: FormatId | 'any';
+  formats: FormatId[];
+  previous?: Asset;
+}): Promise<Asset> {
+  const { supabase, videoId, project, slot, index, format, formats, previous } = options;
+  const avoid = slot.type === 'pexels_clip' && previous?.source ? [previous.source] : [];
+  return makeAsset(supabase, videoId, project, slot, index, format, clipOrientation(formats), avoid);
+}
+
 /**
  * Genera las imágenes (Gemini, una por formato) y baja los clips (Pixabay, uno por visual).
  * Conserva lo que ya está listo y no cambió, salvo que se pida rehacerlo todo.
@@ -166,8 +203,7 @@ export async function generateAssets(options: {
   force: boolean;
 }): Promise<Asset[]> {
   const { supabase, videoId, project, visuals, formats, existing, force } = options;
-  // Solo vertical: clips verticales. Con horizontal (solo o junto al vertical): clips horizontales.
-  const orientation: Orientation = formats.length === 1 && formats[0] === '9:16' ? 'portrait' : 'landscape';
+  const orientation = clipOrientation(formats);
 
   type Job = { slot: VisualSlot; index: number; format: FormatId | 'any' };
   const jobs: Job[] = visuals.flatMap((slot, index): Job[] =>
