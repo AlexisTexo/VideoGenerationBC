@@ -20,7 +20,9 @@ if (!id || !videoId || !isUuid(id) || !isUuid(videoId)) {
 
 const { data: video, error } = await supabase
   .from('videos')
-  .select('id, title, idea, voice_id, voice_name, target_seconds, script, visuals, project:projects(id, name, logo_url)')
+  .select(
+    'id, title, idea, voice_id, voice_name, target_seconds, script, visuals, script_approved, audio_path, audio_seconds, generated_at, project:projects(id, name, logo_url)',
+  )
   .eq('id', videoId)
   .eq('project_id', id)
   .maybeSingle();
@@ -39,6 +41,11 @@ const { data: voiceRows, error: voicesError } = await supabase
   .order('name', { ascending: true });
 const voices = (voiceRows ?? []) as Voice[];
 
+const { data: signed } = video.audio_path
+  ? await supabase.storage.from('video-assets').createSignedUrl(video.audio_path, 3600)
+  : { data: null };
+const audioUrl = signed?.signedUrl ?? '';
+
 const project = video.project as unknown as { id: string; name: string; logo_url: string };
 const scenes = video.script as Scene[];
 const visuals = video.visuals as VisualSlot[];
@@ -48,11 +55,18 @@ const STEPS = [
   { id: 'guion', label: 'Guion' },
   { id: 'visuales', label: 'Visuales' },
   { id: 'voz', label: 'Voz' },
+  { id: 'contenidos', label: 'Contenidos' },
 ] as const;
 const requested = Astro.url.searchParams.get('step');
 const activeId = STEPS.some((s) => s.id === requested) ? requested : 'guion';
 
-const saved = Astro.url.searchParams.get('ok') === '1';
+const okParam = Astro.url.searchParams.get('ok');
+const okMessages: Record<string, string> = {
+  '1': 'Cambios guardados.',
+  saved: 'Guion guardado. Apruébalo para poder generar los contenidos.',
+  approved: 'Guion aprobado.',
+  generated: 'Contenidos generados.',
+};
 const problem = Astro.url.searchParams.get('error');
 const errorMessages: Record<string, string> = {
   counts: `Elige al menos una imagen o un video, hasta ${LIMITS.maxVisuals} en total.`,
@@ -60,11 +74,29 @@ const errorMessages: Record<string, string> = {
   config: 'Falta configurar GEMINI_API_KEY en el archivo .env del servidor.',
   save: 'No se pudieron guardar los cambios.',
   voice: 'Ese ID de voz no tiene un formato válido.',
+  script: 'El guion no puede quedar vacío.',
+  notready: 'Antes de generar: aprueba el guion, planea los visuales y elige la voz.',
+  voice_config: 'Falta ELEVENLABS_API_KEY en el archivo .env del servidor.',
+  voice_auth: 'ElevenLabs rechazó la clave. Revisa ELEVENLABS_API_KEY.',
+  voice_not_found: 'ElevenLabs no encontró esa voz. Revisa el ID en el paso Voz.',
+  voice_quota: 'Se acabaron los créditos de ElevenLabs o hay demasiadas solicitudes. Intenta más tarde.',
+  voice_request: 'No se pudo generar la voz. Intenta de nuevo.',
+  align: 'La voz se generó, pero no se pudieron ajustar los tiempos.',
+  upload: 'No se pudo guardar el audio. Revisa que la migración 0009 esté aplicada.',
 };
 
 const recommended = recommendedVisuals(Math.round(total) || video.target_seconds);
 const imageCount = visuals.filter((v) => v.type === 'gemini_image').length;
 const clipCount = visuals.filter((v) => v.type === 'pexels_clip').length;
+
+const done: Record<string, boolean> = {
+  guion: video.script_approved,
+  visuales: visuals.length > 0,
+  voz: Boolean(video.voice_id),
+  contenidos: Boolean(video.generated_at),
+};
+const ready = done.guion && done.visuales && done.voz;
+const generated = Boolean(video.generated_at);
 
 const clock = (seconds: number) => {
   const m = Math.floor(seconds / 60);
@@ -94,6 +126,49 @@ const field =
       </div>
     </div>
 
+    <div class="mt-8 rounded-2xl border border-border bg-surface p-5">
+      <div class="flex flex-wrap items-center justify-between gap-4">
+        <ul class="flex flex-wrap gap-x-6 gap-y-2" aria-label="Qué falta para generar">
+          {
+            [
+              { id: 'guion', label: 'Guion aprobado' },
+              { id: 'visuales', label: 'Visuales' },
+              { id: 'voz', label: 'Voz' },
+            ].map((item) => (
+              <li class="flex items-center gap-2">
+                {done[item.id] ? (
+                  <svg viewBox="0 0 24 24" class="size-5 text-ok" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Listo">
+                    <path d="M20 6 9 17l-5-5" />
+                  </svg>
+                ) : (
+                  <span class="size-5 rounded-full border-2 border-border" role="img" aria-label="Pendiente" />
+                )}
+                <span class:list={[done[item.id] ? 'font-medium' : 'text-muted']}>{item.label}</span>
+              </li>
+            ))
+          }
+        </ul>
+        {
+          canEdit && ready && (
+            <form method="post" action="/api/videos/generate" data-generate-form>
+              <input type="hidden" name="video_id" value={video.id} />
+              <button type="submit" class={primary} data-generate>
+                {generated ? 'Volver a generar contenidos' : 'Generar contenidos'}
+              </button>
+            </form>
+          )
+        }
+      </div>
+      {
+        !ready && (
+          <p class="mt-3 text-sm text-muted">
+            Aprueba el guion, planea los visuales y elige la voz. Cuando los tres tengan palomita verde aparece el botón
+            para generar los contenidos.
+          </p>
+        )
+      }
+    </div>
+
     <div role="tablist" aria-label="Pasos del video" class="mt-8 flex gap-1 border-b border-border" data-tablist>
       {
         STEPS.map((step) => (
@@ -108,7 +183,7 @@ const field =
             class="-mb-px inline-flex h-12 items-center gap-2 border-b-2 border-transparent px-4 font-medium text-muted transition-colors hover:text-text aria-selected:border-accent aria-selected:text-text"
           >
             {step.label}
-            {((step.id === 'visuales' && visuals.length > 0) || (step.id === 'voz' && video.voice_id)) && (
+            {done[step.id] && (
               <svg viewBox="0 0 24 24" class="size-4 text-ok" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Listo">
                 <path d="M20 6 9 17l-5-5" />
               </svg>
@@ -119,7 +194,7 @@ const field =
     </div>
 
     <div class="mt-8">
-      {saved && <p role="status" data-flash class="mb-6 text-ok">Cambios guardados.</p>}
+      {okParam && okMessages[okParam] && <p role="status" data-flash class="mb-6 text-ok">{okMessages[okParam]}</p>}
       {
         problem && (
           <p role="alert" data-flash class="mb-6 text-danger">
@@ -138,23 +213,49 @@ const field =
             {clock(total)} de {video.target_seconds} s objetivo · {scenes.length} escenas
           </dd>
         </dl>
-        <p class="mt-6 text-muted">
-          Los tiempos son estimados: se ajustan con la duración real de la voz cuando se genera el audio.
+        <p class="mt-6 max-w-prose text-muted">
+          Edita el texto de cualquier escena. Borra todo el texto de una escena para quitarla. Los tiempos se ajustan
+          con la duración real de la voz al generar los contenidos.
         </p>
 
-        <ol class="mt-4 divide-y divide-border rounded-2xl border border-border bg-surface">
+        <form method="post" action="/api/videos/script" class="mt-4" data-script-form>
+          <input type="hidden" name="video_id" value={video.id} />
+          <fieldset disabled={!canEdit}>
+            <ol class="divide-y divide-border rounded-2xl border border-border bg-surface">
+              {
+                scenes.map((scene, index) => (
+                  <li class="grid gap-3 px-5 py-4 sm:grid-cols-[6.5rem_1fr]">
+                    <p class="pt-2 font-medium tabular-nums text-muted">{clock(scene.start)}–{clock(scene.end)}</p>
+                    <div>
+                      <label class="sr-only" for={`scene-${index}`}>Texto de la escena {index + 1}</label>
+                      <textarea
+                        id={`scene-${index}`}
+                        name="narration"
+                        rows="2"
+                        maxlength="1000"
+                        class="w-full resize-none overflow-hidden rounded-lg border border-transparent bg-transparent p-2 leading-relaxed hover:border-border focus-visible:border-focus disabled:opacity-100"
+                        data-narration={scene.narration}>{scene.narration}</textarea>
+                    </div>
+                  </li>
+                ))
+              }
+            </ol>
+          </fieldset>
+
           {
-            scenes.map((scene, index) => (
-              <li class="grid gap-3 px-5 py-4 sm:grid-cols-[6.5rem_1fr]">
-                <p class="font-medium tabular-nums text-muted">
-                  {clock(scene.start)}–{clock(scene.end)}
-                  <span class="sr-only"> escena {index + 1}</span>
+            canEdit && (
+              <div class="mt-6 flex flex-wrap items-center gap-3">
+                <button type="submit" name="action" value="approve" class={primary}>
+                  {video.script_approved ? 'Guion aprobado' : 'Aprobar guion'}
+                </button>
+                <button type="submit" name="action" value="save" class={secondary}>Guardar cambios</button>
+                <p class="text-sm text-muted" data-script-hint aria-live="polite">
+                  {video.script_approved ? 'Si lo editas, tendrás que aprobarlo otra vez.' : 'Revísalo y apruébalo para seguir.'}
                 </p>
-                <p>{scene.narration}</p>
-              </li>
-            ))
+              </div>
+            )
           }
-        </ol>
+        </form>
 
         <div class="mt-10 flex justify-end">
           <button type="button" class={secondary} data-goto="visuales">Siguiente: visuales →</button>
@@ -339,6 +440,52 @@ const field =
           <button type="button" class={secondary} data-goto="visuales">← Visuales</button>
         </div>
       </section>
+
+      <section role="tabpanel" id="panel-contenidos" aria-labelledby="tab-contenidos" data-panel="contenidos" hidden={activeId !== 'contenidos'}>
+        <h2 class="text-2xl font-semibold tracking-tight">Contenidos</h2>
+        {
+          generated ? (
+            <>
+              <p class="mt-2 max-w-prose text-muted">
+                La voz está lista y el guion y los visuales ya usan sus tiempos reales: {video.audio_seconds} segundos.
+              </p>
+
+              <h3 class="mt-8 font-semibold">Voz</h3>
+              {audioUrl ? (
+                <audio controls src={audioUrl} class="mt-3 w-full" />
+              ) : (
+                <p class="mt-3 text-muted">No se pudo cargar el audio. Recarga la página.</p>
+              )}
+
+              <h3 class="mt-8 font-semibold">Paquete para editar</h3>
+              <p class="mt-1 text-muted">Descarga estos archivos y ábrelos en Claude para editar con Hyperframes o Remotion.</p>
+              <div class="mt-3 flex flex-wrap gap-3">
+                <a
+                  class={secondary}
+                  href={`/api/videos/package?video_id=${video.id}&file=timeline.json`}
+                  download="timeline.json"
+                >
+                  timeline.json
+                </a>
+                <a class={secondary} href={`/api/videos/package?video_id=${video.id}&file=brief.md`} download="brief.md">
+                  brief.md
+                </a>
+              </div>
+
+              <h3 class="mt-8 font-semibold">Pendiente de generar</h3>
+              <ul class="mt-2 space-y-1 text-muted">
+                <li>{imageCount} {imageCount === 1 ? 'imagen' : 'imágenes'} con IA: el plan está listo, aún no se genera{imageCount === 1 ? '' : 'n'}.</li>
+                <li>{clipCount} {clipCount === 1 ? 'video' : 'videos'} de stock: el plan está listo, aún no se descarga{clipCount === 1 ? '' : 'n'}.</li>
+              </ul>
+            </>
+          ) : (
+            <p class="mt-2 max-w-prose text-muted">
+              Aún no se generan. Cuando el guion esté aprobado y tengas visuales y voz, usa el botón “Generar contenidos”
+              de arriba.
+            </p>
+          )
+        }
+      </section>
     </div>
   <template data-voice-template>
       <VoiceItem />
@@ -375,6 +522,7 @@ const field =
         }
       }
       document.querySelectorAll('[data-flash]').forEach((el) => el.remove());
+      document.dispatchEvent(new CustomEvent('video:panel'));
       if (push) history.pushState({ step: id }, '', `?step=${id}`);
     };
 
@@ -392,6 +540,38 @@ const field =
       select(next.dataset.tab!, false, true);
       next.focus();
       event.preventDefault();
+    });
+
+    // ---- Guion: cajas de texto que crecen y aviso de cambios ----
+    const narrations = all<HTMLTextAreaElement>('textarea[name="narration"]');
+    const scriptHint = root.querySelector('[data-script-hint]');
+    const fit = (box: HTMLTextAreaElement) => {
+      if (box.offsetParent === null) return; // panel oculto: no hay medida
+      box.style.height = 'auto';
+      box.style.height = `${box.scrollHeight}px`;
+    };
+    for (const box of narrations) {
+      fit(box);
+      box.addEventListener('input', () => {
+        fit(box);
+        if (scriptHint && narrations.some((b) => b.value.trim() !== b.dataset.narration)) {
+          scriptHint.textContent = 'Tienes cambios sin guardar. Al guardar o aprobar, se ajustan los tiempos.';
+        }
+      });
+    }
+    // Las cajas se miden cuando el panel se muestra.
+    const refit = () => narrations.forEach(fit);
+    document.addEventListener('video:panel', refit);
+    window.addEventListener('resize', refit);
+    document.fonts?.ready.then(refit);
+
+    // ---- Generar contenidos ----
+    root.querySelector('[data-generate-form]')?.addEventListener('submit', () => {
+      const button = root.querySelector<HTMLButtonElement>('[data-generate]');
+      if (button) {
+        button.disabled = true;
+        button.textContent = 'Generando la voz…';
+      }
     });
 
     // ---- Visuales ----

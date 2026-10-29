@@ -10,6 +10,7 @@ interface ImportMetaEnv {
   readonly GEMINI_MODEL?: string;
   /** Solo servidor. */
   readonly ELEVENLABS_API_KEY: string;
+  readonly ELEVENLABS_MODEL?: string;
 }
 
 interface ImportMeta {
