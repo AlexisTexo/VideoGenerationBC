@@ -45,26 +45,35 @@ const { data: projects, error } = await supabase
 
     {
       projects && projects.length > 0 && (
-        <ul class="rise mt-10 divide-y divide-border rounded-2xl border border-border bg-surface" style="--i: 1">
-          {projects.map((p) => (
-            <li class="flex items-center gap-2 pr-4 transition-colors hover:bg-bg first:rounded-t-2xl last:rounded-b-2xl">
-              <a
-                href={`/projects/${p.id}`}
-                class="flex min-w-0 flex-1 items-center gap-4 py-4 pl-5 pr-2"
-                aria-label={`Crear un video de ${p.name}`}
-              >
-                <ProjectLogo name={p.name} logoUrl={p.logo_url} />
-                <span class="min-w-0 flex-1">
-                  <span class="block truncate font-semibold">{p.name}</span>
-                  {p.description && <span class="mt-0.5 line-clamp-2 text-muted">{p.description}</span>}
-                </span>
-              </a>
+        <ul class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {projects.map((p, index) => (
+            <li
+              class="rise group relative flex min-h-64 flex-col rounded-2xl border border-border bg-surface p-5 transition-colors hover:border-focus sm:aspect-square"
+              style={`--i: ${index + 1}`}
+            >
+              <ProjectLogo name={p.name} logoUrl={p.logo_url} class="size-14" />
+
+              <h2 class="mt-4 truncate text-lg font-semibold tracking-tight">
+                <a
+                  href={`/projects/${p.id}`}
+                  class="after:absolute after:inset-0 after:rounded-2xl"
+                  aria-label={`Crear un video de ${p.name}`}
+                >
+                  {p.name}
+                </a>
+              </h2>
+              {p.description && <p class="mt-1 line-clamp-3 text-muted">{p.description}</p>}
+
               {canEdit && (
                 <a
                   href={`/projects/${p.id}/settings`}
-                  class="inline-flex h-10 shrink-0 items-center rounded-lg border border-border bg-surface px-4 font-medium transition-[background-color,transform] hover:bg-bg active:scale-[0.98]"
+                  class="relative z-10 mt-auto inline-flex h-10 w-fit items-center gap-2 self-end rounded-lg border border-border bg-bg px-3 font-medium transition-[background-color,transform] hover:bg-surface active:scale-[0.98]"
                   aria-label={`Editar ${p.name}`}
                 >
+                  <svg viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3z"></path>
+                    <path d="M14.5 7.5l3 3"></path>
+                  </svg>
                   Editar
                 </a>
               )}
