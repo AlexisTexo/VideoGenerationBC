@@ -1,0 +1,16 @@
+---
+interface Props {
+  label: string;
+  for: string;
+  hint?: string;
+  class?: string;
+}
+
+const { label, for: htmlFor, hint, class: className } = Astro.props;
+---
+
+<div class={className}>
+  <label for={htmlFor} class="mb-2 block font-medium">{label}</label>
+  <slot />
+  {hint && <p class="mt-2 text-sm text-muted">{hint}</p>}
+</div>

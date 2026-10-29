@@ -1,0 +1,53 @@
+---
+import Base from '../../layouts/Base.astro';
+import AppHeader from '../../components/AppHeader.astro';
+import ProjectForm from '../../components/ProjectForm.astro';
+import { PROJECT_COLUMNS, isUuid, type Project } from '../../lib/projects';
+
+const { supabase, role } = Astro.locals;
+const canEdit = role === 'admin' || role === 'editor';
+
+const { id } = Astro.params;
+if (!id || !isUuid(id)) {
+  return new Response('No encontrado', { status: 404 });
+}
+
+const { data } = await supabase.from('projects').select(PROJECT_COLUMNS).eq('id', id).maybeSingle();
+const project = data as unknown as Project | null;
+if (!project) {
+  return new Response('No encontrado', { status: 404 });
+}
+
+const saved = Astro.url.searchParams.get('ok') === '1';
+const invalid = Astro.url.searchParams.get('error');
+---
+
+<Base title={`${project.name} · VideoGeneratorBC`}>
+  <AppHeader />
+
+  <main class="mx-auto max-w-2xl px-4 pt-10">
+    <a href="/" class="text-muted transition-colors hover:text-text">← Proyectos</a>
+    <h1 class="mt-4 text-3xl font-semibold tracking-tight">{project.name}</h1>
+
+    {saved && <p role="status" class="mt-4 text-ok">Cambios guardados.</p>}
+    {
+      invalid && (
+        <p role="alert" class="mt-4 text-danger">
+          {invalid === 'invalid'
+            ? 'Revisa el nombre y que los colores tengan formato #RRGGBB.'
+            : 'No se pudieron guardar los cambios.'}
+        </p>
+      )
+    }
+
+    <div class="mt-10">
+      <ProjectForm
+        project={project}
+        projectId={project.id}
+        action="/api/projects/update"
+        submitLabel="Guardar cambios"
+        canEdit={canEdit}
+      />
+    </div>
+  </main>
+</Base>

@@ -1,15 +1,70 @@
 ---
 import Base from '../layouts/Base.astro';
 import AppHeader from '../components/AppHeader.astro';
+
+const { supabase, role } = Astro.locals;
+const canEdit = role === 'admin' || role === 'editor';
+
+const { data: projects, error } = await supabase
+  .from('projects')
+  .select('id, name, description, color_primary, color_secondary, color_accent, color_background, color_text')
+  .order('name', { ascending: true });
 ---
 
-<Base title="Panel · VideoGeneratorBC">
+<Base title="Proyectos · VideoGeneratorBC">
   <AppHeader />
 
   <main class="mx-auto max-w-5xl px-4 py-10">
-    <h1 class="rise text-3xl font-semibold tracking-tight" style="--i: 0">Proyectos</h1>
-    <p class="rise mt-3 text-muted" style="--i: 1">
-      Aún no hay proyectos. Aquí aparecerán cuando los crees.
-    </p>
+    <div class="rise flex flex-wrap items-end justify-between gap-4" style="--i: 0">
+      <div>
+        <h1 class="text-3xl font-semibold tracking-tight">Proyectos</h1>
+        <p class="mt-2 text-muted">Elige un proyecto para ver o editar su marca, voz y contenido.</p>
+      </div>
+      {
+        canEdit && (
+          <a
+            href="/projects/new"
+            class="inline-flex h-12 items-center rounded-lg bg-accent px-6 font-semibold text-accent-fg transition-[background-color,transform] hover:bg-accent-hover active:scale-[0.98]"
+          >
+            Nuevo proyecto
+          </a>
+        )
+      }
+    </div>
+
+    {error && <p role="alert" class="mt-8 text-danger">No se pudieron cargar los proyectos.</p>}
+
+    {
+      projects && projects.length === 0 && (
+        <p class="rise mt-10 text-muted" style="--i: 1">
+          Aún no hay proyectos.{canEdit ? ' Crea el primero con el botón de arriba.' : ''}
+        </p>
+      )
+    }
+
+    {
+      projects && projects.length > 0 && (
+        <ul class="rise mt-10 divide-y divide-border rounded-2xl border border-border bg-surface" style="--i: 1">
+          {projects.map((p) => (
+            <li>
+              <a
+                href={`/projects/${p.id}`}
+                class="flex items-center justify-between gap-4 px-5 py-4 transition-colors hover:bg-bg first:rounded-t-2xl last:rounded-b-2xl"
+              >
+                <span class="min-w-0">
+                  <span class="block truncate font-semibold">{p.name}</span>
+                  {p.description && <span class="mt-0.5 block truncate text-muted">{p.description}</span>}
+                </span>
+                <span class="flex shrink-0 items-center gap-2" aria-hidden="true">
+                  {[p.color_primary, p.color_secondary, p.color_accent, p.color_background, p.color_text].map((c) => (
+                    <span class="size-5 rounded-full border border-border" style={`background:${c}`} />
+                  ))}
+                </span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      )
+    }
   </main>
 </Base>

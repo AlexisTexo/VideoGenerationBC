@@ -1,0 +1,49 @@
+---
+import Field from './Field.astro';
+
+interface Props {
+  name: string;
+  label: string;
+  value: string;
+}
+
+const { name, label, value } = Astro.props;
+---
+
+<Field label={label} for={name}>
+  <div class="flex items-center gap-3" data-color-field>
+    <input
+      type="color"
+      value={value.toLowerCase()}
+      aria-label={`Selector de color: ${label}`}
+      class="size-12 shrink-0 cursor-pointer rounded-lg border border-border bg-bg p-1"
+    />
+    <input
+      id={name}
+      name={name}
+      type="text"
+      value={value.toUpperCase()}
+      maxlength="7"
+      pattern="#[0-9A-Fa-f]{6}"
+      title="Color en formato #RRGGBB"
+      autocomplete="off"
+      spellcheck="false"
+      class="h-12 w-full rounded-lg border border-border bg-bg px-4 text-base uppercase focus-visible:border-focus"
+    />
+  </div>
+</Field>
+
+<script>
+  const HEX = /^#[0-9a-f]{6}$/i;
+  for (const wrap of document.querySelectorAll<HTMLElement>('[data-color-field]')) {
+    const picker = wrap.querySelector<HTMLInputElement>('input[type="color"]');
+    const hex = wrap.querySelector<HTMLInputElement>('input[type="text"]');
+    if (!picker || !hex) continue;
+    picker.addEventListener('input', () => {
+      hex.value = picker.value.toUpperCase();
+    });
+    hex.addEventListener('input', () => {
+      if (HEX.test(hex.value)) picker.value = hex.value.toLowerCase();
+    });
+  }
+</script>

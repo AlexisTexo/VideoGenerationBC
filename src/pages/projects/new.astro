@@ -1,0 +1,42 @@
+---
+import Base from '../../layouts/Base.astro';
+import AppHeader from '../../components/AppHeader.astro';
+import ProjectForm from '../../components/ProjectForm.astro';
+import { PROJECT_DEFAULTS } from '../../lib/projects';
+
+const { role } = Astro.locals;
+if (role !== 'admin' && role !== 'editor') {
+  return Astro.redirect('/');
+}
+
+const error = Astro.url.searchParams.get('error');
+---
+
+<Base title="Nuevo proyecto · VideoGeneratorBC">
+  <AppHeader />
+
+  <main class="mx-auto max-w-2xl px-4 py-10">
+    <a href="/" class="text-muted transition-colors hover:text-text">← Proyectos</a>
+    <h1 class="mt-4 text-3xl font-semibold tracking-tight">Nuevo proyecto</h1>
+    <p class="mt-2 text-muted">Empieza con el nombre. Todo lo demás se puede ajustar después.</p>
+
+    {
+      error && (
+        <p role="alert" class="mt-6 text-danger">
+          {error === 'invalid'
+            ? 'Revisa el nombre y que los colores tengan formato #RRGGBB.'
+            : 'No se pudo crear el proyecto.'}
+        </p>
+      )
+    }
+
+    <div class="mt-10">
+      <ProjectForm
+        project={PROJECT_DEFAULTS}
+        action="/api/projects/create"
+        submitLabel="Crear proyecto"
+        canEdit={true}
+      />
+    </div>
+  </main>
+</Base>
