@@ -25,7 +25,9 @@ const error = Astro.url.searchParams.get('error');
         <p role="alert" class="mt-6 text-danger">
           {error === 'invalid'
             ? 'Revisa el nombre y que los colores tengan formato #RRGGBB.'
-            : 'No se pudo crear el proyecto.'}
+            : error === 'logo'
+              ? 'El logo debe ser PNG, JPG o WebP de máximo 2 MB.'
+              : 'No se pudo crear el proyecto.'}
         </p>
       )
     }

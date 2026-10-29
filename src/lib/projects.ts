@@ -31,6 +31,7 @@ export interface Project {
   id: string;
   name: string;
   description: string;
+  logo_url: string;
   color_primary: string;
   color_secondary: string;
   color_accent: string;
@@ -57,9 +58,13 @@ export interface Project {
 
 export type ProjectInput = Omit<Project, 'id'>;
 
+/** Lo que llega del formulario: el logo se gestiona aparte (archivo + Storage). */
+export type ProjectFormData = Omit<ProjectInput, 'logo_url'>;
+
 export const PROJECT_DEFAULTS: ProjectInput = {
   name: '',
   description: '',
+  logo_url: '',
   color_primary: '#7C05F2',
   color_secondary: '#2B88D9',
   color_accent: '#798BF2',
@@ -111,7 +116,7 @@ function pick(value: string, options: readonly { value: string }[], fallback: st
 }
 
 /** Valida y normaliza el formulario. Devuelve null si falta lo indispensable o un color es inválido. */
-export function parseProjectForm(form: FormData): ProjectInput | null {
+export function parseProjectForm(form: FormData): ProjectFormData | null {
   const name = text(form, 'name', 80);
   if (!name) return null;
 

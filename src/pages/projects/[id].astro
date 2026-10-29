@@ -35,7 +35,9 @@ const invalid = Astro.url.searchParams.get('error');
         <p role="alert" class="mt-4 text-danger">
           {invalid === 'invalid'
             ? 'Revisa el nombre y que los colores tengan formato #RRGGBB.'
-            : 'No se pudieron guardar los cambios.'}
+            : invalid === 'logo'
+              ? 'El logo debe ser PNG, JPG o WebP de máximo 2 MB.'
+              : 'No se pudieron guardar los cambios.'}
         </p>
       )
     }

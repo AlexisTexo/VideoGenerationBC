@@ -1,6 +1,7 @@
 ---
 import Field from './Field.astro';
 import ColorField from './ColorField.astro';
+import ProjectLogo from './ProjectLogo.astro';
 import {
   ASPECTS,
   FONTS,
@@ -27,7 +28,7 @@ const area =
 const section = 'border-t border-border pt-10';
 ---
 
-<form method="post" action={action} class="space-y-12">
+<form method="post" action={action} enctype="multipart/form-data" class="space-y-12">
   {projectId && <input type="hidden" name="id" value={projectId} />}
 
   <fieldset disabled={!canEdit} class="space-y-12">
@@ -42,6 +43,28 @@ const section = 'border-t border-border pt-10';
       <Field label="Descripción" for="description" hint="Qué es el producto y qué lo hace distinto.">
         <textarea id="description" name="description" maxlength="2000" class={area}>{p.description}</textarea>
       </Field>
+      <div class="flex items-start gap-4">
+        <ProjectLogo name={p.name || 'Proyecto'} logoUrl={p.logo_url} class="size-20" />
+        <div class="min-w-0 flex-1">
+          <Field label="Logo" for="logo" hint="PNG, JPG o WebP, máximo 2 MB. Se ve mejor con fondo transparente.">
+            <input
+              id="logo"
+              name="logo"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              class="block w-full text-base file:mr-4 file:h-10 file:cursor-pointer file:rounded-lg file:border file:border-border file:bg-surface file:px-4 file:font-medium file:text-text hover:file:bg-bg"
+            />
+          </Field>
+          {
+            p.logo_url && (
+              <label class="mt-3 flex cursor-pointer items-center gap-3">
+                <input type="checkbox" name="remove_logo" class="size-5 accent-accent" />
+                Quitar el logo actual
+              </label>
+            )
+          }
+        </div>
+      </div>
     </section>
 
     <section class={`${section} space-y-6`}>

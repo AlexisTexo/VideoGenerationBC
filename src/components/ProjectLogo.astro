@@ -1,0 +1,23 @@
+---
+interface Props {
+  name: string;
+  logoUrl: string;
+  class?: string;
+}
+
+const { name, logoUrl, class: className = 'size-12' } = Astro.props;
+---
+
+<span
+  class:list={['grid shrink-0 place-items-center overflow-hidden rounded-xl border border-border bg-bg', className]}
+>
+  {
+    logoUrl ? (
+      <img src={logoUrl} alt="" loading="lazy" class="size-full object-contain p-1.5" />
+    ) : (
+      <span class="text-lg font-semibold uppercase text-muted" aria-hidden="true">
+        {name.trim().charAt(0) || '?'}
+      </span>
+    )
+  }
+</span>
