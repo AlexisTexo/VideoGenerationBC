@@ -1,0 +1,54 @@
+---
+import type { Voice } from '../lib/voices';
+
+interface Props {
+  voice?: Partial<Voice>;
+}
+
+const { voice = {} } = Astro.props;
+const { id = '', voice_id = '', name = '', preview_url = '' } = voice;
+
+const action =
+  'h-10 items-center rounded-lg border border-border bg-bg px-4 font-medium transition-[background-color,transform] duration-150 ease-out hover:bg-surface active:scale-[0.97]';
+---
+
+<li
+  class="group flex items-center gap-3 rounded-xl border border-border bg-surface p-3 transition-colors data-[selected=true]:border-accent"
+  data-voice-item
+  data-id={id}
+  data-voice-id={voice_id}
+  data-name={name}
+  data-preview={preview_url}
+>
+  <button
+    type="button"
+    data-item-play
+    aria-label={`Escuchar ${name || 'voz'}`}
+    class="group/play grid size-10 shrink-0 place-items-center rounded-full bg-accent text-accent-fg transition-[background-color,transform] duration-150 ease-out hover:bg-accent-hover active:scale-[0.97] disabled:opacity-40"
+    disabled={!preview_url}
+  >
+    <svg viewBox="0 0 24 24" class="size-4 group-data-[playing=true]/play:hidden" fill="currentColor" aria-hidden="true">
+      <path d="M8 5.5v13a1 1 0 0 0 1.5.86l10-6.5a1 1 0 0 0 0-1.72l-10-6.5A1 1 0 0 0 8 5.5Z" />
+    </svg>
+    <svg viewBox="0 0 24 24" class="hidden size-4 group-data-[playing=true]/play:block" fill="currentColor" aria-hidden="true">
+      <rect x="6" y="5" width="4" height="14" rx="1" />
+      <rect x="14" y="5" width="4" height="14" rx="1" />
+    </svg>
+  </button>
+  <div class="min-w-0 flex-1">
+    <p class="truncate font-semibold" data-item-name>{name || 'Voz sin nombre'}</p>
+    <p class="truncate text-sm text-muted" data-item-id>{voice_id}</p>
+  </div>
+  <button type="button" data-item-use class={action}>Usar</button>
+  <button
+    type="button"
+    data-item-delete
+    aria-label={`Quitar ${name || 'voz'} de la biblioteca`}
+    title="Quitar de la biblioteca"
+    class="grid size-10 shrink-0 place-items-center rounded-lg border border-border text-muted transition-[color,background-color,transform] duration-150 ease-out hover:bg-bg hover:text-danger active:scale-[0.97]"
+  >
+    <svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" />
+    </svg>
+  </button>
+</li>

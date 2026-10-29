@@ -3,10 +3,12 @@ import Base from '../../../../layouts/Base.astro';
 import AppHeader from '../../../../components/AppHeader.astro';
 import ProjectLogo from '../../../../components/ProjectLogo.astro';
 import Stepper from '../../../../components/Stepper.astro';
+import VoiceItem from '../../../../components/VoiceItem.astro';
 import { isUuid } from '../../../../lib/projects';
 import { VISUAL_LABELS, type Scene, type VisualSlot } from '../../../../lib/video-ai';
 import { LIMITS, recommendedVisuals } from '../../../../lib/video-plan';
 import { canCreate } from '../../../../lib/video-data';
+import { VOICE_COLUMNS, type Voice } from '../../../../lib/voices';
 
 const { supabase, role } = Astro.locals;
 const canEdit = canCreate(role);
@@ -30,6 +32,12 @@ if (error) {
 if (!video) {
   return new Response('No encontrado', { status: 404 });
 }
+
+const { data: voiceRows, error: voicesError } = await supabase
+  .from('voices')
+  .select(VOICE_COLUMNS)
+  .order('name', { ascending: true });
+const voices = (voiceRows ?? []) as Voice[];
 
 const project = video.project as unknown as { id: string; name: string; logo_url: string };
 const scenes = video.script as Scene[];
@@ -236,10 +244,11 @@ const field =
       <section role="tabpanel" id="panel-voz" aria-labelledby="tab-voz" data-panel="voz" hidden={activeId !== 'voz'}>
         <h2 class="text-2xl font-semibold tracking-tight">Elige la voz</h2>
         <p class="mt-2 max-w-prose text-muted">
-          Pega el ID de la voz de ElevenLabs y escúchala antes de guardarla.
+          Pega el ID de una voz de ElevenLabs, escúchala y guárdala en tu biblioteca. Después puedes elegir entre todas
+          tus voces.
         </p>
 
-        <form method="post" action="/api/videos/voice" class="mt-6">
+        <form method="post" action="/api/videos/voice" class="mt-6" data-voice-form>
           <input type="hidden" name="video_id" value={video.id} />
           <input type="hidden" name="voice_name" value={video.voice_name} data-voice-name />
           <fieldset disabled={!canEdit}>
@@ -259,29 +268,35 @@ const field =
               <button type="button" class={secondary} data-voice-preview>Escuchar</button>
             </div>
             <p class="mt-3 text-muted" data-voice-status aria-live="polite">
-              {video.voice_name ? `Voz guardada: ${video.voice_name}` : ''}
+              {video.voice_name ? `Voz de este video: ${video.voice_name}` : ''}
             </p>
 
-            <div class="mt-4 flex items-center gap-4 rounded-2xl border border-border bg-surface p-4" hidden data-voice-card>
-              <button
-                type="button"
-                data-voice-play
-                aria-label="Reproducir o pausar la muestra"
-                class="group grid size-12 shrink-0 place-items-center rounded-full bg-accent text-accent-fg transition-[background-color,transform] duration-150 ease-out hover:bg-accent-hover active:scale-[0.97]"
-              >
-                <svg viewBox="0 0 24 24" class="size-5 group-data-[playing=true]:hidden" fill="currentColor" aria-hidden="true">
-                  <path d="M8 5.5v13a1 1 0 0 0 1.5.86l10-6.5a1 1 0 0 0 0-1.72l-10-6.5A1 1 0 0 0 8 5.5Z" />
-                </svg>
-                <svg viewBox="0 0 24 24" class="hidden size-5 group-data-[playing=true]:block" fill="currentColor" aria-hidden="true">
-                  <rect x="6" y="5" width="4" height="14" rx="1" />
-                  <rect x="14" y="5" width="4" height="14" rx="1" />
-                </svg>
-              </button>
-              <div class="min-w-0 flex-1">
-                <p class="truncate font-semibold" data-voice-title></p>
-                <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-border" aria-hidden="true">
-                  <div class="h-full origin-left bg-accent" style="transform: scaleX(0)" data-voice-progress></div>
+            <div class="mt-4 rounded-2xl border border-border bg-surface p-4" hidden data-voice-card>
+              <div class="flex items-center gap-4">
+                <button
+                  type="button"
+                  data-voice-play
+                  aria-label="Reproducir o pausar la muestra"
+                  class="group grid size-12 shrink-0 place-items-center rounded-full bg-accent text-accent-fg transition-[background-color,transform] duration-150 ease-out hover:bg-accent-hover active:scale-[0.97]"
+                >
+                  <svg viewBox="0 0 24 24" class="size-5 group-data-[playing=true]:hidden" fill="currentColor" aria-hidden="true">
+                    <path d="M8 5.5v13a1 1 0 0 0 1.5.86l10-6.5a1 1 0 0 0 0-1.72l-10-6.5A1 1 0 0 0 8 5.5Z" />
+                  </svg>
+                  <svg viewBox="0 0 24 24" class="hidden size-5 group-data-[playing=true]:block" fill="currentColor" aria-hidden="true">
+                    <rect x="6" y="5" width="4" height="14" rx="1" />
+                    <rect x="14" y="5" width="4" height="14" rx="1" />
+                  </svg>
+                </button>
+                <div class="min-w-0 flex-1">
+                  <p class="truncate font-semibold" data-voice-title></p>
+                  <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-border" aria-hidden="true">
+                    <div class="h-full origin-left bg-accent" style="transform: scaleX(0)" data-voice-progress></div>
+                  </div>
                 </div>
+              </div>
+              <div class="mt-4 flex flex-wrap items-center gap-3">
+                <button type="button" class={secondary} data-voice-save>Guardar en mi biblioteca</button>
+                <p class="text-sm text-muted" data-save-status aria-live="polite"></p>
               </div>
             </div>
             <audio hidden data-voice-audio></audio>
@@ -290,18 +305,34 @@ const field =
           {
             canEdit && (
               <div class="mt-6 flex flex-wrap items-center gap-3">
-                <button type="submit" class={primary}>Guardar voz</button>
+                <button type="submit" class={primary}>Usar esta voz en el video</button>
                 <p class="text-sm text-muted">Dejar el ID vacío quita la voz del video.</p>
               </div>
             )
           }
         </form>
 
+        <div class="mt-12 border-t border-border pt-8">
+          <h3 class="text-xl font-semibold tracking-tight">
+            Mis voces <span class="font-normal text-muted tabular-nums" data-voices-count>({voices.length})</span>
+          </h3>
+          {voicesError && <p class="mt-2 text-danger">Falta la migración 0008 para la biblioteca de voces.</p>}
+          <ul class="mt-4 space-y-3" data-voices>
+            {voices.map((v) => <VoiceItem voice={v} />)}
+          </ul>
+          <p class="mt-2 text-muted" data-voices-empty hidden={voices.length > 0}>
+            Aún no guardas voces. Escucha una y pulsa “Guardar en mi biblioteca”.
+          </p>
+        </div>
+
         <div class="mt-10 flex">
           <button type="button" class={secondary} data-goto="visuales">← Visuales</button>
         </div>
       </section>
     </div>
+  <template data-voice-template>
+      <VoiceItem />
+    </template>
   </main>
 </Base>
 
@@ -388,7 +419,7 @@ const field =
     });
     refreshVisuals();
 
-    // ---- Voz ----
+    // ---- Voz: reproductor compartido, búsqueda y biblioteca ----
     const voiceInput = q<HTMLInputElement>('[data-voice-id]');
     const voiceName = q<HTMLInputElement>('[data-voice-name]');
     const voiceStatus = q('[data-voice-status]');
@@ -398,19 +429,73 @@ const field =
     const voiceAudio = q<HTMLAudioElement>('[data-voice-audio]');
     const voicePlay = q<HTMLButtonElement>('[data-voice-play]');
     const voiceProgress = q('[data-voice-progress]');
+    const saveButton = q<HTMLButtonElement>('[data-voice-save]');
+    const saveStatus = q('[data-save-status]');
+    const voiceList = q('[data-voices]');
+    const voiceTemplate = q<HTMLTemplateElement>('[data-voice-template]');
 
-    voiceInput.addEventListener('input', () => (voiceName.value = ''));
-    voiceAudio.addEventListener('play', () => (voicePlay.dataset.playing = 'true'));
-    voiceAudio.addEventListener('pause', () => (voicePlay.dataset.playing = 'false'));
+    let found: { voiceId: string } | null = null;
+    let playingButton: HTMLElement | null = null;
+
+    const setPlaying = (button: HTMLElement | null, playing: boolean) => {
+      if (button) button.dataset.playing = String(playing);
+    };
+
+    // Un solo audio para todo: al tocar otra muestra, la anterior se detiene.
+    const toggleSample = (button: HTMLElement, url: string) => {
+      if (playingButton === button && !voiceAudio.paused) {
+        voiceAudio.pause();
+        return;
+      }
+      setPlaying(playingButton, false);
+      playingButton = button;
+      if (voiceAudio.getAttribute('src') !== url) voiceAudio.src = url;
+      voiceProgress.style.transform = 'scaleX(0)';
+      voiceAudio.play().catch(() => setPlaying(button, false));
+    };
+
+    voiceAudio.addEventListener('play', () => setPlaying(playingButton, true));
+    voiceAudio.addEventListener('pause', () => setPlaying(playingButton, false));
     voiceAudio.addEventListener('ended', () => {
-      voicePlay.dataset.playing = 'false';
+      setPlaying(playingButton, false);
       voiceProgress.style.transform = 'scaleX(0)';
     });
     voiceAudio.addEventListener('timeupdate', () => {
+      if (playingButton !== voicePlay) return;
       const ratio = voiceAudio.duration ? voiceAudio.currentTime / voiceAudio.duration : 0;
       voiceProgress.style.transform = `scaleX(${ratio})`;
     });
-    voicePlay.addEventListener('click', () => (voiceAudio.paused ? voiceAudio.play() : voiceAudio.pause()));
+    voicePlay.addEventListener('click', () => {
+      const url = voicePlay.dataset.url;
+      if (url) toggleSample(voicePlay, url);
+    });
+
+    const refreshLibrary = () => {
+      const current = voiceInput.value.trim();
+      const items = all('[data-voice-item]');
+      q('[data-voices-count]').textContent = `(${items.length})`;
+      q('[data-voices-empty]').hidden = items.length > 0;
+      for (const item of items) item.dataset.selected = String(Boolean(current) && item.dataset.voiceId === current);
+    };
+
+    const fillItem = (item: HTMLElement, voice: { id: string; voice_id: string; name: string; preview_url: string }) => {
+      item.dataset.id = voice.id;
+      item.dataset.voiceId = voice.voice_id;
+      item.dataset.name = voice.name;
+      item.dataset.preview = voice.preview_url;
+      item.querySelector('[data-item-name]')!.textContent = voice.name || 'Voz sin nombre';
+      item.querySelector('[data-item-id]')!.textContent = voice.voice_id;
+      const play = item.querySelector<HTMLButtonElement>('[data-item-play]')!;
+      play.disabled = !voice.preview_url;
+      play.setAttribute('aria-label', `Escuchar ${voice.name || 'voz'}`);
+    };
+
+    voiceInput.addEventListener('input', () => {
+      voiceName.value = '';
+      found = null;
+      saveStatus.textContent = '';
+      refreshLibrary();
+    });
 
     voiceButton.addEventListener('click', async () => {
       const id = voiceInput.value.trim();
@@ -434,17 +519,19 @@ const field =
           voiceCard.hidden = true;
           return;
         }
+        found = { voiceId: id };
         voiceName.value = data.name ?? '';
         voiceTitle.textContent = data.name || 'Voz sin nombre';
         voiceCard.hidden = false;
+        saveStatus.textContent = '';
+        voiceStatus.textContent = '';
         if (data.previewUrl) {
-          voiceStatus.textContent = '';
-          voiceAudio.src = data.previewUrl;
+          voicePlay.dataset.url = data.previewUrl;
           voicePlay.hidden = false;
-          voiceAudio.play().catch(() => {});
+          toggleSample(voicePlay, data.previewUrl);
         } else {
-          voiceStatus.textContent = 'Esta voz no tiene muestra de audio disponible.';
           voicePlay.hidden = true;
+          voiceStatus.textContent = 'Esta voz no tiene muestra de audio disponible.';
         }
       } catch {
         voiceStatus.textContent = 'No se pudo consultar ElevenLabs.';
@@ -452,5 +539,75 @@ const field =
         voiceButton.disabled = false;
       }
     });
+
+    // Guardar en la biblioteca: el servidor consulta la voz y guarda nombre y copia de la muestra.
+    saveButton.addEventListener('click', async () => {
+      if (!found) return;
+      saveButton.disabled = true;
+      saveStatus.textContent = 'Guardando…';
+      try {
+        const response = await fetch('/api/voices/save', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ voice_id: found.voiceId }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          saveStatus.textContent =
+            data.error === 'save'
+              ? 'No se pudo guardar. Revisa que la migración 0008 esté aplicada.'
+              : 'No se pudo guardar la voz.';
+          return;
+        }
+        let item = all('[data-voice-item]').find((el) => el.dataset.voiceId === data.voice.voice_id);
+        if (!item) {
+          item = (voiceTemplate.content.cloneNode(true) as DocumentFragment).querySelector<HTMLElement>('[data-voice-item]')!;
+          item.classList.add('panel-in');
+          voiceList.prepend(item);
+        }
+        fillItem(item, data.voice);
+        voicePlay.dataset.url = data.voice.preview_url || voicePlay.dataset.url || '';
+        saveStatus.textContent = 'Guardada en tu biblioteca.';
+        refreshLibrary();
+      } catch {
+        saveStatus.textContent = 'No se pudo guardar la voz.';
+      } finally {
+        saveButton.disabled = false;
+      }
+    });
+
+    // Acciones de cada voz guardada: escuchar, usar y quitar.
+    voiceList.addEventListener('click', async (event) => {
+      const target = event.target as HTMLElement;
+      const item = target.closest<HTMLElement>('[data-voice-item]');
+      if (!item) return;
+
+      const play = target.closest<HTMLElement>('[data-item-play]');
+      if (play && item.dataset.preview) toggleSample(play, item.dataset.preview);
+
+      if (target.closest('[data-item-use]')) {
+        voiceInput.value = item.dataset.voiceId ?? '';
+        voiceName.value = item.dataset.name ?? '';
+        voiceStatus.textContent = `Elegiste ${item.dataset.name || 'esta voz'}. Pulsa “Usar esta voz en el video” para guardarla.`;
+        voiceCard.hidden = true;
+        found = null;
+        refreshLibrary();
+        voiceInput.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+
+      if (target.closest('[data-item-delete]')) {
+        const response = await fetch('/api/voices/delete', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id: item.dataset.id }),
+        });
+        if (!response.ok) return;
+        if (playingButton && item.contains(playingButton)) voiceAudio.pause();
+        item.remove();
+        refreshLibrary();
+      }
+    });
+
+    refreshLibrary();
   }
 </script>
