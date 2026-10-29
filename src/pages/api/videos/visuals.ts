@@ -4,6 +4,7 @@ import { PROJECT_COLUMNS, isUuid, type Project } from '../../../lib/projects';
 import { planVisuals, type Scene } from '../../../lib/video-ai';
 import { isFormatId } from '../../../lib/video-format';
 import { parseVisualCounts } from '../../../lib/video-plan';
+import { savePreferences, shareOf } from '../../../lib/preferences';
 import { canCreate } from '../../../lib/video-data';
 
 export const prerender = false;
@@ -48,5 +49,7 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
     console.error('guardar visuales falló:', error.code, error.message);
     return back('error=save');
   }
+  // Se recuerdan el formato y la proporción de imágenes para los videos nuevos.
+  await savePreferences(supabase, locals.user?.id, { formats, image_share: shareOf(counts) });
   return back('ok=1');
 };

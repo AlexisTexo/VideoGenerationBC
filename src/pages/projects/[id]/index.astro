@@ -6,6 +6,7 @@ import IdeaItem from '../../../components/IdeaItem.astro';
 import Stepper from '../../../components/Stepper.astro';
 import { PROJECT_COLUMNS, isUuid, type Project } from '../../../lib/projects';
 import { LIMITS, PRESET_SECONDS } from '../../../lib/video-plan';
+import { loadPreferences } from '../../../lib/preferences';
 import { canCreate, loadIdeas } from '../../../lib/video-data';
 
 const { supabase, role } = Astro.locals;
@@ -42,7 +43,10 @@ const errorMessages: Record<string, string> = {
   plan: `La duración debe estar entre ${LIMITS.minSeconds} y ${LIMITS.maxSeconds} segundos.`,
 };
 
-const DEFAULT_SECONDS = 45;
+// Arranca con la última duración que usó esta persona.
+const { prefs, saved: hasPrefs } = await loadPreferences(supabase, Astro.locals.user?.id);
+const DEFAULT_SECONDS = Math.min(LIMITS.maxSeconds, Math.max(LIMITS.minSeconds, prefs.seconds));
+const prefsReset = Astro.url.searchParams.get('ok') === 'prefs';
 
 const buttonBase =
   'inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-base font-semibold transition-[background-color,transform] duration-150 ease-out active:scale-[0.97] disabled:opacity-50 disabled:active:scale-100';
@@ -91,6 +95,7 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
       )
     }
     {!canEdit && <p class="mt-6 text-muted">Tu rol solo permite ver este proyecto.</p>}
+    {prefsReset && <p role="status" class="mt-6 text-ok">Preferencias restablecidas.</p>}
 
     <form
       id="studio-form"
@@ -231,9 +236,23 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
             )
           }
           <p class="mt-3 text-sm text-muted">
-            Después del guion eliges cuántas imágenes y videos de Pexels quieres, y al final la voz. Escribirlo puede
-            tardar hasta un minuto.
+            Después del guion eliges los visuales, el formato, la voz y el audio. Escribirlo puede tardar hasta un
+            minuto.
           </p>
+          {
+            hasPrefs && canEdit && (
+              <p class="mt-4 border-t border-border pt-4 text-sm text-muted">
+                Recordamos tus últimas elecciones (duración, formato, voz y efectos) para que no las repitas.
+                <button
+                  type="submit"
+                  form="prefs-form"
+                  class="ml-1 font-medium text-text underline underline-offset-4 transition-opacity duration-150 ease-out hover:opacity-70"
+                >
+                  Restablecer
+                </button>
+              </p>
+            )
+          }
         </div>
       </aside>
 
@@ -246,6 +265,10 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
           </div>
         )
       }
+    </form>
+
+    <form id="prefs-form" method="post" action="/api/preferences">
+      <input type="hidden" name="project_id" value={project.id} />
     </form>
 
     <template data-idea-template>

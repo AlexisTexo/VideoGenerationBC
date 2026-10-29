@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { isUuid } from '../../../lib/projects';
+import { savePreferences } from '../../../lib/preferences';
 import { canCreate } from '../../../lib/video-data';
 
 export const prerender = false;
@@ -29,5 +30,6 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
     console.error('guardar audio falló:', error.code, error.message);
     return back('error=music_save');
   }
+  await savePreferences(supabase, locals.user?.id, { sfx: form.get('sfx') === 'on' });
   return back('ok=audio');
 };

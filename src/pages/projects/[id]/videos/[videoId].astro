@@ -9,6 +9,7 @@ import { VISUAL_LABELS, type Scene, type VisualSlot } from '../../../../lib/vide
 import { assetFor, normalizeAssets } from '../../../../lib/video-assets';
 import { FORMAT_IDS, FORMATS, isFormatId, type FormatId } from '../../../../lib/video-format';
 import { MUSIC_COLUMNS, type MusicTrack } from '../../../../lib/music';
+import { loadPreferences, visualsFor } from '../../../../lib/preferences';
 import { LIMITS, recommendedVisuals } from '../../../../lib/video-plan';
 import { canCreate } from '../../../../lib/video-data';
 import { VOICE_COLUMNS, type Voice } from '../../../../lib/voices';
@@ -124,7 +125,11 @@ const errorMessages: Record<string, string> = {
   music_request: 'No se pudo generar la música. Intenta de nuevo.',
 };
 
-const recommended = recommendedVisuals(Math.round(total) || video.target_seconds);
+// Sin visuales aún: se propone la cantidad recomendada con la proporción de imágenes que esta persona suele usar.
+const { prefs, saved: hasPrefs } = await loadPreferences(supabase, Astro.locals.user?.id);
+const recommended = hasPrefs
+  ? visualsFor(Math.round(total) || video.target_seconds, prefs.image_share)
+  : recommendedVisuals(Math.round(total) || video.target_seconds);
 const imageCount = visuals.filter((v) => v.type === 'gemini_image').length;
 const clipCount = visuals.filter((v) => v.type === 'pexels_clip').length;
 
