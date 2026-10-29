@@ -48,23 +48,33 @@ const errorMessages: Record<string, string> = {
   save: 'El guion se escribió, pero no se pudo guardar el video.',
 };
 
-const input =
-  'h-12 w-full rounded-lg border border-border bg-bg px-4 text-base focus-visible:border-focus disabled:opacity-60';
-const secondary =
-  'h-12 shrink-0 rounded-lg border border-border bg-surface px-5 text-base font-semibold transition-[background-color,transform] hover:bg-bg active:scale-[0.98] disabled:opacity-60';
+const DURATION_HINTS: Record<number, string> = { 30: 'Directo', 45: 'Equilibrado', 60: 'Con detalle', 90: 'A fondo' };
+
+const STEPS = [
+  { id: 'voz', label: 'Voz' },
+  { id: 'idea', label: 'Idea' },
+  { id: 'duracion', label: 'Duración' },
+] as const;
+
+const buttonBase =
+  'inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-base font-semibold transition-[background-color,transform] duration-150 ease-out active:scale-[0.97] disabled:opacity-50 disabled:active:scale-100';
+const secondary = `${buttonBase} border border-border bg-surface hover:bg-bg`;
+const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
+const field =
+  'h-12 w-full rounded-xl border border-border bg-surface px-4 text-base focus-visible:border-focus disabled:opacity-60';
 ---
 
 <Base title={`Nuevo video · ${project.name}`}>
   <AppHeader />
 
-  <main class="mx-auto max-w-2xl px-4 py-10" data-studio data-project-id={project.id}>
+  <main class="mx-auto max-w-5xl px-4 py-8" data-studio data-project-id={project.id}>
     <a href="/" class="text-muted transition-colors hover:text-text">← Proyectos</a>
 
     <div class="mt-4 flex flex-wrap items-center justify-between gap-4">
       <div class="flex items-center gap-4">
-        <ProjectLogo name={project.name} logoUrl={project.logo_url} class="size-14" />
+        <ProjectLogo name={project.name} logoUrl={project.logo_url} class="size-12" />
         <div>
-          <h1 class="text-3xl font-semibold tracking-tight">Nuevo video</h1>
+          <h1 class="text-2xl font-semibold tracking-tight">Nuevo video</h1>
           <p class="text-muted">{project.name}</p>
         </div>
       </div>
@@ -72,7 +82,7 @@ const secondary =
         canEdit && (
           <a
             href={`/projects/${project.id}/settings`}
-            class="inline-flex h-10 items-center rounded-lg border border-border bg-surface px-4 font-medium transition-[background-color,transform] hover:bg-bg active:scale-[0.98]"
+            class="inline-flex h-10 items-center rounded-lg border border-border bg-surface px-4 font-medium transition-colors hover:bg-bg"
           >
             Editar proyecto
           </a>
@@ -96,49 +106,112 @@ const secondary =
     }
     {!canEdit && <p class="mt-6 text-muted">Tu rol solo permite ver este proyecto.</p>}
 
-    <form method="post" action="/api/videos/create" class="mt-10 space-y-12" data-studio-form>
+    <form
+      id="studio-form"
+      method="post"
+      action="/api/videos/create"
+      class="mt-8 grid gap-8 lg:grid-cols-[minmax(0,1fr)_19rem]"
+      data-studio-form
+    >
       <input type="hidden" name="project_id" value={project.id} />
       <input type="hidden" name="idea_id" value="" data-idea-id />
       <input type="hidden" name="voice_name" value={lastVideo?.voice_name ?? ''} data-voice-name />
 
-      <fieldset disabled={!canEdit || needsMigration} class="space-y-12">
-        <section class="space-y-4">
-          <div>
-            <h2 class="text-xl font-semibold tracking-tight">Voz</h2>
-            <p class="mt-2 text-muted">
-              Pega el ID de la voz de ElevenLabs y escúchala. Es opcional: puedes elegirla después.
-            </p>
-          </div>
-          <div class="flex gap-3">
-            <label class="sr-only" for="voice_id">ID de voz (ElevenLabs)</label>
-            <input
-              id="voice_id"
-              name="voice_id"
-              maxlength="40"
-              autocomplete="off"
-              spellcheck="false"
-              placeholder="ID de voz"
-              value={lastVideo?.voice_id ?? ''}
-              class={input}
-              data-voice-id
-            />
-            <button type="button" class={secondary} data-voice-preview>Escuchar</button>
-          </div>
-          <p class="text-muted" data-voice-status aria-live="polite">
-            {lastVideo?.voice_name ? `Última voz usada: ${lastVideo.voice_name}` : ''}
-          </p>
-          <audio controls hidden class="w-full" data-voice-audio></audio>
-        </section>
+      <div class="min-w-0">
+        <div role="tablist" aria-label="Pasos del video" class="flex gap-1 border-b border-border" data-tablist>
+          {
+            STEPS.map((step, index) => (
+              <button
+                type="button"
+                role="tab"
+                id={`tab-${step.id}`}
+                aria-controls={`panel-${step.id}`}
+                aria-selected={index === 0 ? 'true' : 'false'}
+                tabindex={index === 0 ? 0 : -1}
+                data-tab={step.id}
+                class="-mb-px inline-flex h-12 items-center gap-2 border-b-2 border-transparent px-4 font-medium text-muted transition-colors hover:text-text aria-selected:border-accent aria-selected:text-text"
+              >
+                {step.label}
+                <svg
+                  viewBox="0 0 24 24"
+                  class="hidden size-4 text-ok"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  data-tab-done
+                  aria-label="Listo"
+                  role="img"
+                >
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+              </button>
+            ))
+          }
+        </div>
 
-        <section class="space-y-4">
-          <div>
-            <h2 class="text-xl font-semibold tracking-tight">Idea</h2>
-            <p class="mt-2 text-muted">
-              Cuéntame la idea general. Si no tienes una, pide ideas: tomo en cuenta el proyecto y lo que ya se hizo.
+        <fieldset disabled={!canEdit || needsMigration} class="mt-8">
+          <section role="tabpanel" id="panel-voz" aria-labelledby="tab-voz" data-panel="voz">
+            <h2 class="text-2xl font-semibold tracking-tight">Elige la voz</h2>
+            <p class="mt-2 max-w-prose text-muted">
+              Pega el ID de la voz de ElevenLabs y escúchala. Es opcional: puedes decidirla después.
             </p>
-          </div>
-          <div>
-            <label for="idea" class="mb-2 block font-medium">Tu idea</label>
+            <div class="mt-6 flex gap-3">
+              <label class="sr-only" for="voice_id">ID de voz (ElevenLabs)</label>
+              <input
+                id="voice_id"
+                name="voice_id"
+                maxlength="40"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="ID de voz"
+                value={lastVideo?.voice_id ?? ''}
+                class={field}
+                data-voice-id
+              />
+              <button type="button" class={secondary} data-voice-preview>Escuchar</button>
+            </div>
+            <p class="mt-3 text-muted" data-voice-status aria-live="polite">
+              {lastVideo?.voice_name ? `Última voz usada: ${lastVideo.voice_name}` : ''}
+            </p>
+
+            <div
+              class="mt-4 flex items-center gap-4 rounded-2xl border border-border bg-surface p-4"
+              hidden
+              data-voice-card
+            >
+              <button
+                type="button"
+                data-voice-play
+                aria-label="Reproducir o pausar la muestra"
+                class="group grid size-12 shrink-0 place-items-center rounded-full bg-accent text-accent-fg transition-[background-color,transform] duration-150 ease-out hover:bg-accent-hover active:scale-[0.97]"
+              >
+                <svg viewBox="0 0 24 24" class="size-5 group-data-[playing=true]:hidden" fill="currentColor" aria-hidden="true">
+                  <path d="M8 5.5v13a1 1 0 0 0 1.5.86l10-6.5a1 1 0 0 0 0-1.72l-10-6.5A1 1 0 0 0 8 5.5Z" />
+                </svg>
+                <svg viewBox="0 0 24 24" class="hidden size-5 group-data-[playing=true]:block" fill="currentColor" aria-hidden="true">
+                  <rect x="6" y="5" width="4" height="14" rx="1" />
+                  <rect x="14" y="5" width="4" height="14" rx="1" />
+                </svg>
+              </button>
+              <div class="min-w-0 flex-1">
+                <p class="truncate font-semibold" data-voice-title></p>
+                <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-border" aria-hidden="true">
+                  <div class="h-full origin-left bg-accent" style="transform: scaleX(0)" data-voice-progress></div>
+                </div>
+              </div>
+            </div>
+            <audio hidden data-voice-audio></audio>
+          </section>
+
+          <section role="tabpanel" id="panel-idea" aria-labelledby="tab-idea" data-panel="idea" hidden>
+            <h2 class="text-2xl font-semibold tracking-tight">Cuenta la idea</h2>
+            <p class="mt-2 max-w-prose text-muted">
+              Escribe la idea general. Si aún no tienes una, pide ideas: la IA conoce el proyecto y lo que ya se hizo.
+            </p>
+
+            <label class="sr-only" for="idea">Tu idea</label>
             <textarea
               id="idea"
               name="idea"
@@ -146,67 +219,138 @@ const secondary =
               minlength="5"
               maxlength="2000"
               placeholder="Por ejemplo: mostrar cómo un supervisor detecta un rondín omitido en segundos"
-              class="min-h-28 w-full rounded-lg border border-border bg-bg px-4 py-3 text-base focus-visible:border-focus disabled:opacity-60"
+              class="mt-6 min-h-36 w-full resize-y rounded-xl border border-border bg-surface p-4 text-lg leading-relaxed focus-visible:border-focus disabled:opacity-60"
               data-idea-text></textarea>
-          </div>
-          <div class="flex flex-wrap items-center gap-4">
-            <button type="button" class={secondary} data-suggest>Dame ideas</button>
-            <p class="text-muted" data-suggest-status aria-live="polite"></p>
-          </div>
+            <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+              <div class="flex flex-wrap items-center gap-3">
+                <button type="button" class={secondary} data-suggest>
+                  <svg viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
+                    <path d="M19 16l.7 1.8L21.5 18.5l-1.8.7L19 21l-.7-1.8-1.8-.7 1.8-.7z" />
+                  </svg>
+                  <span data-suggest-label>Dame ideas</span>
+                </button>
+                <p class="text-muted" data-suggest-status aria-live="polite"></p>
+              </div>
+              <p class="text-sm tabular-nums text-muted" data-idea-count>0 / 2000</p>
+            </div>
 
-          <div class="pt-2">
-            <h3 class="font-semibold">
-              Ideas sugeridas <span class="font-normal text-muted" data-count="suggested">({suggested.length})</span>
-            </h3>
-            <ul class="mt-1 divide-y divide-border" data-ideas="suggested">
-              {suggested.map((i) => <IdeaItem {...i} />)}
-            </ul>
-            <p class="mt-2 text-muted" data-empty="suggested" hidden={suggested.length > 0}>
-              No hay ideas pendientes. Pulsa “Dame ideas”.
+            <div class="mt-10">
+              <div class="inline-flex rounded-xl border border-border bg-surface p-1" role="group" aria-label="Lista de ideas">
+                <button
+                  type="button"
+                  data-list-tab="suggested"
+                  aria-pressed="true"
+                  class="h-10 rounded-lg px-4 font-medium text-muted transition-colors aria-pressed:bg-bg aria-pressed:text-text"
+                >
+                  Sugeridas <span class="tabular-nums" data-count="suggested">{suggested.length}</span>
+                </button>
+                <button
+                  type="button"
+                  data-list-tab="history"
+                  aria-pressed="false"
+                  class="h-10 rounded-lg px-4 font-medium text-muted transition-colors aria-pressed:bg-bg aria-pressed:text-text"
+                >
+                  Historial <span class="tabular-nums" data-count="history">{history.length}</span>
+                </button>
+              </div>
+
+              <div class="mt-4" data-list-panel="suggested">
+                <ul class="space-y-3" data-ideas="suggested">
+                  {suggested.map((i) => <IdeaItem {...i} />)}
+                </ul>
+                <p class="text-muted" data-empty="suggested" hidden={suggested.length > 0}>
+                  No hay ideas pendientes. Pulsa “Dame ideas”.
+                </p>
+              </div>
+              <div class="mt-4" data-list-panel="history" hidden>
+                <p class="mb-3 max-w-prose text-muted">
+                  Lo que ya se usó o se descartó. La IA no lo repite; si reutilizas una, la modifica para que se sienta
+                  distinta.
+                </p>
+                <ul class="space-y-3" data-ideas="history">
+                  {history.map((i) => <IdeaItem {...i} />)}
+                </ul>
+                <p class="text-muted" data-empty="history" hidden={history.length > 0}>Aún no hay historial.</p>
+              </div>
+            </div>
+          </section>
+
+          <section role="tabpanel" id="panel-duracion" aria-labelledby="tab-duracion" data-panel="duracion" hidden>
+            <h2 class="text-2xl font-semibold tracking-tight">Duración</h2>
+            <p class="mt-2 max-w-prose text-muted">
+              El guion se divide en escenas con el segundo exacto de cada una.
             </p>
-          </div>
-        </section>
+            <div role="radiogroup" aria-label="Duración del video" class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {
+                DURATIONS.map((s) => (
+                  <label class="cursor-pointer">
+                    <input type="radio" name="seconds" value={s} checked={s === 45} class="peer sr-only" data-seconds />
+                    <span class="block rounded-xl border border-border bg-surface p-4 text-center transition-colors peer-checked:border-accent peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus">
+                      <span class="block text-2xl font-semibold tabular-nums">
+                        {s}
+                        <span class="text-base font-normal text-muted"> s</span>
+                      </span>
+                      <span class="mt-1 block text-sm text-muted">{DURATION_HINTS[s]}</span>
+                    </span>
+                  </label>
+                ))
+              }
+            </div>
+          </section>
+        </fieldset>
+      </div>
 
-        <section class="space-y-4">
-          <div>
-            <h2 class="text-xl font-semibold tracking-tight">Duración</h2>
-            <p class="mt-2 text-muted">El guion se divide en escenas con el segundo exacto de cada una.</p>
-          </div>
-          <label class="sr-only" for="seconds">Duración del video</label>
-          <select id="seconds" name="seconds" class={`${input} sm:max-w-xs`}>
-            {DURATIONS.map((s) => <option value={s} selected={s === 45}>{s} segundos</option>)}
-          </select>
-        </section>
-      </fieldset>
+      <aside class="lg:sticky lg:top-6 lg:self-start">
+        <div class="rounded-2xl border border-border bg-surface p-5">
+          <h2 class="font-semibold">Tu video</h2>
+          <ul class="mt-3 divide-y divide-border">
+            {
+              [
+                { id: 'voz', label: 'Voz', empty: 'Sin elegir' },
+                { id: 'idea', label: 'Idea', empty: 'Falta escribirla' },
+                { id: 'duracion', label: 'Duración', empty: '45 segundos' },
+              ].map((row) => (
+                <li>
+                  <button
+                    type="button"
+                    data-goto={row.id}
+                    class="flex w-full items-start justify-between gap-4 py-3 text-left transition-colors hover:text-accent"
+                  >
+                    <span class="text-muted">{row.label}</span>
+                    <span class="line-clamp-2 min-w-0 text-right font-medium" data-sum={row.id}>
+                      {row.empty}
+                    </span>
+                  </button>
+                </li>
+              ))
+            }
+          </ul>
+          {
+            canEdit && (
+              <div class="mt-4 hidden lg:block">
+                <button type="submit" disabled={needsMigration} class={`${primary} w-full`} data-submit>
+                  Escribir guion
+                </button>
+              </div>
+            )
+          }
+          <p class="mt-3 text-sm text-muted">
+            La IA usa el contexto del proyecto y evita repetir ideas anteriores. Puede tardar hasta un minuto.
+          </p>
+        </div>
+      </aside>
 
       {
         canEdit && (
-          <div class="sticky bottom-0 -mx-4 border-t border-border bg-bg/95 px-4 py-4">
-            <button
-              type="submit"
-              disabled={needsMigration}
-              class="h-12 w-full rounded-lg bg-accent px-6 text-base font-semibold text-accent-fg transition-[background-color,transform] hover:bg-accent-hover active:scale-[0.98] disabled:opacity-60 sm:w-auto"
-              data-submit
-            >
+          <div class="sticky bottom-0 -mx-4 border-t border-border bg-bg px-4 py-3 lg:hidden">
+            <button type="submit" disabled={needsMigration} class={`${primary} w-full`} data-submit>
               Escribir guion
             </button>
           </div>
         )
       }
     </form>
-
-    <details class="mt-12 border-t border-border pt-8" open={history.length > 0}>
-      <summary class="cursor-pointer text-xl font-semibold tracking-tight">
-        Historial de ideas <span class="font-normal text-muted" data-count="history">({history.length})</span>
-      </summary>
-      <p class="mt-2 text-muted">
-        Lo que ya se usó o se descartó. La IA no lo repite; si reutilizas una, la modifica para que se sienta distinta.
-      </p>
-      <ul class="mt-2 divide-y divide-border" data-ideas="history">
-        {history.map((i) => <IdeaItem {...i} />)}
-      </ul>
-      <p class="mt-2 text-muted" data-empty="history" hidden={history.length > 0}>Aún no hay historial.</p>
-    </details>
 
     <template data-idea-template>
       <IdeaItem />
@@ -219,35 +363,125 @@ const secondary =
 
   if (root) {
     const q = <T extends HTMLElement>(selector: string) => root.querySelector<T>(selector)!;
+    const all = <T extends HTMLElement>(selector: string) => [...root.querySelectorAll<T>(selector)];
     const projectId = root.dataset.projectId!;
 
     const voiceInput = q<HTMLInputElement>('[data-voice-id]');
     const voiceName = q<HTMLInputElement>('[data-voice-name]');
     const voiceStatus = q('[data-voice-status]');
-    const voiceAudio = q<HTMLAudioElement>('[data-voice-audio]');
     const voiceButton = q<HTMLButtonElement>('[data-voice-preview]');
+    const voiceCard = q('[data-voice-card]');
+    const voiceTitle = q('[data-voice-title]');
+    const voiceAudio = q<HTMLAudioElement>('[data-voice-audio]');
+    const voicePlay = q<HTMLButtonElement>('[data-voice-play]');
+    const voiceProgress = q('[data-voice-progress]');
 
     const ideaText = q<HTMLTextAreaElement>('[data-idea-text]');
+    const ideaCount = q('[data-idea-count]');
     const ideaId = q<HTMLInputElement>('[data-idea-id]');
     const suggestButton = q<HTMLButtonElement>('[data-suggest]');
+    const suggestLabel = q('[data-suggest-label]');
     const suggestStatus = q('[data-suggest-status]');
     const template = q<HTMLTemplateElement>('[data-idea-template]');
-    const lists = {
-      suggested: q('[data-ideas="suggested"]'),
-      history: q('[data-ideas="history"]'),
-    };
+    const lists = { suggested: q('[data-ideas="suggested"]'), history: q('[data-ideas="history"]') };
 
     const STATUS_LABELS: Record<string, string> = { suggested: 'Sugerida', used: 'Usada', discarded: 'Descartada' };
 
-    const refresh = () => {
+    // ---- Pasos (tabs) ----
+    const tabs = all<HTMLButtonElement>('[role="tab"]');
+    const panels = all('[data-panel]');
+
+    const select = (id: string, animate: boolean) => {
+      for (const tab of tabs) {
+        const active = tab.dataset.tab === id;
+        tab.setAttribute('aria-selected', String(active));
+        tab.tabIndex = active ? 0 : -1;
+      }
+      for (const panel of panels) {
+        const active = panel.dataset.panel === id;
+        panel.hidden = !active;
+        panel.classList.remove('panel-in');
+        if (active && animate) {
+          void panel.offsetWidth; // reinicia la animación
+          panel.classList.add('panel-in');
+        }
+      }
+    };
+
+    for (const tab of tabs) tab.addEventListener('click', () => select(tab.dataset.tab!, true));
+
+    // Con teclado no se anima (acción frecuente).
+    q('[data-tablist]').addEventListener('keydown', (event) => {
+      const key = (event as KeyboardEvent).key;
+      if (key !== 'ArrowRight' && key !== 'ArrowLeft') return;
+      const current = tabs.findIndex((t) => t.getAttribute('aria-selected') === 'true');
+      const next = tabs[(current + (key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+      select(next.dataset.tab!, false);
+      next.focus();
+      event.preventDefault();
+    });
+
+    for (const row of all('[data-goto]')) row.addEventListener('click', () => select(row.dataset.goto!, true));
+
+    // ---- Resumen en vivo ----
+    const submits = all<HTMLButtonElement>('[data-submit]');
+    const needsMigration = submits.length > 0 && submits[0].disabled;
+
+    const refreshSummary = () => {
+      const idea = ideaText.value.trim();
+      const voiceId = voiceInput.value.trim();
+      const seconds = root.querySelector<HTMLInputElement>('[data-seconds]:checked')?.value ?? '45';
+      const ideaReady = idea.length >= 5;
+
+      q('[data-sum="voz"]').textContent = voiceName.value || (voiceId ? `ID …${voiceId.slice(-4)}` : 'Sin elegir');
+      const ideaSummary = q('[data-sum="idea"]');
+      ideaSummary.textContent = ideaReady ? idea : 'Falta escribirla';
+      ideaSummary.classList.toggle('text-danger', !ideaReady);
+      q('[data-sum="duracion"]').textContent = `${seconds} segundos`;
+      ideaCount.textContent = `${ideaText.value.length} / 2000`;
+
+      const done: Record<string, boolean> = { voz: Boolean(voiceId), idea: ideaReady, duracion: true };
+      for (const tab of tabs) tab.querySelector<SVGElement>('[data-tab-done]')!.classList.toggle('hidden', !done[tab.dataset.tab!]);
+
+      if (!needsMigration) for (const button of submits) button.disabled = !ideaReady;
+    };
+
+    ideaText.addEventListener('input', refreshSummary);
+    voiceInput.addEventListener('input', () => {
+      voiceName.value = '';
+      refreshSummary();
+    });
+    for (const radio of all<HTMLInputElement>('[data-seconds]')) radio.addEventListener('change', refreshSummary);
+
+    // ---- Lista de ideas: sugeridas / historial ----
+    const refreshLists = () => {
       for (const key of ['suggested', 'history'] as const) {
         const total = lists[key].children.length;
-        q(`[data-count="${key}"]`).textContent = `(${total})`;
+        q(`[data-count="${key}"]`).textContent = String(total);
         q(`[data-empty="${key}"]`).hidden = total > 0;
       }
     };
 
-    // ---- Vista previa de voz ----
+    const listTabs = all<HTMLButtonElement>('[data-list-tab]');
+    const showList = (key: string) => {
+      for (const tab of listTabs) tab.setAttribute('aria-pressed', String(tab.dataset.listTab === key));
+      for (const panel of all('[data-list-panel]')) panel.hidden = panel.dataset.listPanel !== key;
+    };
+    for (const tab of listTabs) tab.addEventListener('click', () => showList(tab.dataset.listTab!));
+
+    // ---- Voz: búsqueda y reproductor ----
+    voiceAudio.addEventListener('play', () => (voicePlay.dataset.playing = 'true'));
+    voiceAudio.addEventListener('pause', () => (voicePlay.dataset.playing = 'false'));
+    voiceAudio.addEventListener('ended', () => {
+      voicePlay.dataset.playing = 'false';
+      voiceProgress.style.transform = 'scaleX(0)';
+    });
+    voiceAudio.addEventListener('timeupdate', () => {
+      const ratio = voiceAudio.duration ? voiceAudio.currentTime / voiceAudio.duration : 0;
+      voiceProgress.style.transform = `scaleX(${ratio})`;
+    });
+    voicePlay.addEventListener('click', () => (voiceAudio.paused ? voiceAudio.play() : voiceAudio.pause()));
+
     voiceButton.addEventListener('click', async () => {
       const id = voiceInput.value.trim();
       if (!id) {
@@ -267,19 +501,22 @@ const secondary =
             auth: 'ElevenLabs rechazó la clave. Revisa ELEVENLABS_API_KEY.',
           };
           voiceStatus.textContent = messages[data.error] ?? 'No se pudo consultar ElevenLabs.';
-          voiceAudio.hidden = true;
+          voiceCard.hidden = true;
           return;
         }
         voiceName.value = data.name ?? '';
+        voiceTitle.textContent = data.name || 'Voz sin nombre';
+        voiceCard.hidden = false;
         if (data.previewUrl) {
-          voiceStatus.textContent = `Voz: ${data.name}`;
+          voiceStatus.textContent = '';
           voiceAudio.src = data.previewUrl;
-          voiceAudio.hidden = false;
+          voicePlay.hidden = false;
           voiceAudio.play().catch(() => {});
         } else {
-          voiceStatus.textContent = `Voz: ${data.name} (sin muestra de audio disponible)`;
-          voiceAudio.hidden = true;
+          voiceStatus.textContent = 'Esta voz no tiene muestra de audio disponible.';
+          voicePlay.hidden = true;
         }
+        refreshSummary();
       } catch {
         voiceStatus.textContent = 'No se pudo consultar ElevenLabs.';
       } finally {
@@ -300,7 +537,7 @@ const secondary =
 
     suggestButton.addEventListener('click', async () => {
       suggestButton.disabled = true;
-      suggestButton.textContent = 'Pensando…';
+      suggestLabel.textContent = 'Pensando…';
       suggestStatus.textContent = '';
       try {
         const response = await fetch('/api/ideas/suggest', {
@@ -317,15 +554,16 @@ const secondary =
           return;
         }
         for (const idea of [...data.ideas].reverse()) addIdea(idea);
+        showList('suggested');
         suggestStatus.textContent = data.ideas.length
           ? `${data.ideas.length} ideas nuevas.`
-          : 'Todas las ideas se parecían al historial. Prueba con otra dirección.';
-        refresh();
+          : 'Todas se parecían al historial. Prueba con otra dirección.';
+        refreshLists();
       } catch {
         suggestStatus.textContent = 'No se pudieron generar ideas. Intenta de nuevo.';
       } finally {
         suggestButton.disabled = false;
-        suggestButton.textContent = 'Dame ideas';
+        suggestLabel.textContent = 'Dame ideas';
       }
     });
 
@@ -339,8 +577,10 @@ const secondary =
         const angle = item.querySelector('[data-idea-angle]')!.textContent ?? '';
         ideaText.value = angle ? `${title}. ${angle}` : title;
         ideaId.value = item.dataset.id ?? '';
-        ideaText.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        ideaText.focus();
+        for (const other of all('[data-idea]')) other.dataset.selected = String(other === item);
+        refreshSummary();
+        ideaText.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        ideaText.focus({ preventScroll: true });
       }
 
       if (target.closest('[data-discard-idea]')) {
@@ -354,17 +594,19 @@ const secondary =
         item.querySelector('[data-idea-status]')!.textContent = STATUS_LABELS.discarded;
         if (ideaId.value === item.dataset.id) ideaId.value = '';
         lists.history.prepend(item);
-        refresh();
+        refreshLists();
       }
     });
 
     // Escribir el guion tarda: se avisa y se evita el doble envío.
     q<HTMLFormElement>('[data-studio-form]').addEventListener('submit', () => {
-      const submit = root.querySelector<HTMLButtonElement>('[data-submit]');
-      if (submit) {
-        submit.disabled = true;
-        submit.textContent = 'Escribiendo guion… puede tardar hasta un minuto';
+      for (const button of submits) {
+        button.disabled = true;
+        button.textContent = 'Escribiendo guion…';
       }
     });
+
+    select('voz', false);
+    refreshSummary();
   }
 </script>

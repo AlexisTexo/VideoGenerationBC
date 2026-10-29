@@ -11,30 +11,31 @@ interface Props {
 const { id = '', title = '', angle = '', status = 'suggested' } = Astro.props;
 
 const action =
-  'h-10 items-center rounded-lg border border-border bg-surface px-4 font-medium transition-[background-color,transform] hover:bg-bg active:scale-[0.98]';
+  'h-10 items-center rounded-lg border border-border bg-bg px-4 font-medium transition-[background-color,transform] duration-150 ease-out hover:bg-surface active:scale-[0.97]';
 ---
 
-<li class="group py-4" data-idea data-id={id} data-status={status}>
-  <div class="flex flex-wrap items-start justify-between gap-3">
-    <div class="min-w-0 flex-1">
-      <p class="font-semibold" data-idea-title>{title}</p>
-      <p class="mt-1 text-muted" data-idea-angle>{angle}</p>
-      <p class="mt-1 hidden text-sm text-muted group-data-[status=discarded]:block group-data-[status=used]:block" data-idea-status>
-        {IDEA_STATUS_LABELS[status]}
-      </p>
-    </div>
-    <div class="flex shrink-0 gap-2">
-      <button type="button" data-use-idea class={`inline-flex ${action}`}>
-        <span class="group-data-[status=used]:hidden">Usar</span>
-        <span class="hidden group-data-[status=used]:inline">Usar con otra variación</span>
-      </button>
-      <button
-        type="button"
-        data-discard-idea
-        class={`hidden group-data-[status=suggested]:inline-flex ${action} text-muted hover:text-text`}
-      >
-        Descartar
-      </button>
-    </div>
+<li
+  class="group rounded-xl border border-border bg-surface p-4 transition-colors data-[selected=true]:border-accent"
+  data-idea
+  data-id={id}
+  data-status={status}
+>
+  <p class="font-semibold" data-idea-title>{title}</p>
+  <p class="mt-1 text-muted" data-idea-angle>{angle}</p>
+  <p class="mt-1 hidden text-sm text-muted group-data-[status=discarded]:block group-data-[status=used]:block" data-idea-status>
+    {IDEA_STATUS_LABELS[status]}
+  </p>
+  <div class="mt-3 flex flex-wrap gap-2">
+    <button type="button" data-use-idea class={`inline-flex ${action}`}>
+      <span class="group-data-[status=used]:hidden">Usar esta idea</span>
+      <span class="hidden group-data-[status=used]:inline">Usar con otra variación</span>
+    </button>
+    <button
+      type="button"
+      data-discard-idea
+      class={`hidden group-data-[status=suggested]:inline-flex ${action} text-muted hover:text-text`}
+    >
+      Descartar
+    </button>
   </div>
 </li>

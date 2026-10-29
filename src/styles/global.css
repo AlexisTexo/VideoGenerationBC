@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@fontsource-variable/geist";
 
 /*
  * Paleta de marca: #7C05F2 · #8D44F2 · #798BF2 · #2B88D9 · #F2F2F2
@@ -49,7 +50,7 @@
   --color-focus: var(--focus);
   --color-danger: var(--danger);
   --color-ok: var(--ok);
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: "Geist Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 
 html {
@@ -82,7 +83,7 @@ body {
 }
 
 .rise {
-  animation: rise 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation: rise 0.4s cubic-bezier(0.23, 1, 0.32, 1) both;
   animation-delay: calc(var(--i, 0) * 70ms);
 }
 
@@ -99,12 +100,19 @@ body {
 }
 
 .panel-in {
-  animation: panel-in 0.22s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation: panel-in 0.2s cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+/* Menos movimiento: se conserva el fundido y se quita el desplazamiento. */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .rise,
   .panel-in {
-    animation: none;
+    animation-name: fade-in;
   }
 }
