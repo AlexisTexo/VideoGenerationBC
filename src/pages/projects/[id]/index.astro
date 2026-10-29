@@ -5,7 +5,7 @@ import ProjectLogo from '../../../components/ProjectLogo.astro';
 import IdeaItem from '../../../components/IdeaItem.astro';
 import Stepper from '../../../components/Stepper.astro';
 import { PROJECT_COLUMNS, isUuid, type Project } from '../../../lib/projects';
-import { LIMITS, PRESET_SECONDS } from '../../../lib/video-plan';
+import { BULK_LIMITS, LIMITS, PRESET_SECONDS } from '../../../lib/video-plan';
 import { loadPreferences } from '../../../lib/preferences';
 import { canCreate, loadIdeas } from '../../../lib/video-data';
 
@@ -31,8 +31,29 @@ const ideas = await loadIdeas(supabase, id);
 const suggested = ideas.filter((i) => i.status === 'suggested');
 const history = ideas.filter((i) => i.status !== 'suggested');
 
-const { error: videosError } = await supabase.from('videos').select('id').eq('project_id', id).limit(1);
+const { data: videoRows, error: videosError } = await supabase
+  .from('videos')
+  .select('id, title, script_approved, generated_at, parent_video_id, created_at')
+  .eq('project_id', id)
+  .order('created_at', { ascending: false })
+  .limit(80);
 const needsMigration = Boolean(videosError);
+const videos = (videoRows ?? []) as {
+  id: string;
+  title: string;
+  script_approved: boolean;
+  generated_at: string | null;
+  parent_video_id: string | null;
+  created_at: string;
+}[];
+const startTab = Astro.url.searchParams.get('tab') === 'videos' ? 'videos' : 'suggested';
+const param = (name: string) => Astro.url.searchParams.get(name) ?? '';
+const bulkOk =
+  param('ok') === 'bulk'
+    ? `Listo: ${param('n')} ${param('n') === '1' ? 'video creado' : 'videos creados'} como borrador.${
+        param('failed') ? ` ${param('failed')} ${param('failed') === '1' ? 'idea no se pudo escribir' : 'ideas no se pudieron escribir'}: siguen en Sugeridas.` : ''
+      }${param('unplanned') ? ' Alguno quedó sin plan de visuales: arma el suyo en su pestaña Visuales.' : ''} Abre cada uno para aprobar su guion.`
+    : '';
 
 const error = Astro.url.searchParams.get('error');
 const errorMessages: Record<string, string> = {
@@ -41,6 +62,10 @@ const errorMessages: Record<string, string> = {
   config: 'Falta configurar GEMINI_API_KEY en el archivo .env del servidor.',
   save: 'El guion se escribió, pero no se pudo guardar el video.',
   plan: `La duración debe estar entre ${LIMITS.minSeconds} y ${LIMITS.maxSeconds} segundos.`,
+  bulk_pick: 'Elige al menos una idea sugerida.',
+  bulk_limit: `Máximo ${BULK_LIMITS.ideas} ideas, ${BULK_LIMITS.perIdea} videos por idea y ${BULK_LIMITS.total} videos en total.`,
+  bulk_ai: 'No se pudo escribir ningún guion. Intenta de nuevo en un momento.',
+  bulk_save: 'Los guiones se escribieron, pero no se pudieron guardar los videos.',
 };
 
 // Arranca con la última duración que usó esta persona.
@@ -96,6 +121,7 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
     }
     {!canEdit && <p class="mt-6 text-muted">Tu rol solo permite ver este proyecto.</p>}
     {prefsReset && <p role="status" class="mt-6 text-ok">Preferencias restablecidas.</p>}
+    {bulkOk && <p role="status" class="mt-6 text-ok">{bulkOk}</p>}
 
     <form
       id="studio-form"
@@ -143,7 +169,7 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
               <button
                 type="button"
                 data-list-tab="suggested"
-                aria-pressed="true"
+                aria-pressed={startTab === 'suggested' ? 'true' : 'false'}
                 class="h-10 rounded-lg px-4 font-medium text-muted transition-colors aria-pressed:bg-bg aria-pressed:text-text"
               >
                 Sugeridas <span class="tabular-nums" data-count="suggested">{suggested.length}</span>
@@ -156,15 +182,71 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
               >
                 Historial <span class="tabular-nums" data-count="history">{history.length}</span>
               </button>
+              <button
+                type="button"
+                data-list-tab="videos"
+                aria-pressed={startTab === 'videos' ? 'true' : 'false'}
+                class="h-10 rounded-lg px-4 font-medium text-muted transition-colors aria-pressed:bg-bg aria-pressed:text-text"
+              >
+                Videos <span class="tabular-nums">{videos.length}</span>
+              </button>
             </div>
 
-            <div class="mt-4" data-list-panel="suggested">
+            <div class="mt-4" data-list-panel="suggested" hidden={startTab !== 'suggested'}>
+              {
+                canEdit && suggested.length > 0 && (
+                  <div class="mb-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                    <p class="max-w-prose text-muted">
+                      Marca las ideas que te gusten y crea un video de cada una de una vez.
+                    </p>
+                    <button type="button" data-pick-all class="h-10 rounded-lg px-3 font-medium text-muted transition-colors hover:text-text">
+                      Elegir todas
+                    </button>
+                  </div>
+                )
+              }
+              <div
+                data-bulk
+                hidden
+                class="sticky top-2 z-10 mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-accent bg-surface p-3"
+              >
+                <p class="font-medium" data-bulk-count aria-live="polite"></p>
+                <label class="flex items-center gap-2 text-muted">
+                  Videos por idea
+                  <select data-bulk-per class="h-10 rounded-lg border border-border bg-bg px-2 text-text"></select>
+                </label>
+                <button type="button" data-bulk-run class={`${primary} ml-auto`}>Crear videos</button>
+                <p class="w-full text-sm text-muted" data-bulk-status role="status"></p>
+              </div>
               <ul class="space-y-3" data-ideas="suggested">
                 {suggested.map((i) => <IdeaItem {...i} />)}
               </ul>
               <p class="text-muted" data-empty="suggested" hidden={suggested.length > 0}>
                 No hay ideas pendientes. Pulsa “Dame ideas”.
               </p>
+            </div>
+            <div class="mt-4" data-list-panel="videos" hidden={startTab !== 'videos'}>
+              {
+                videos.length === 0 ? (
+                  <p class="text-muted">Aún no hay videos en este proyecto.</p>
+                ) : (
+                  <ul class="divide-y divide-border rounded-xl border border-border bg-surface">
+                    {videos.map((v) => (
+                      <li>
+                        <a href={`/projects/${project.id}/videos/${v.id}`} class="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 px-4 py-3 transition-colors hover:bg-bg">
+                          <span class="min-w-0 font-medium">
+                            {v.title || 'Guion sin título'}
+                            {v.parent_video_id && <span class="ml-2 text-sm font-normal text-muted">Variante</span>}
+                          </span>
+                          <span class="text-sm text-muted">
+                            {v.generated_at ? 'Contenidos generados' : v.script_approved ? 'Guion aprobado' : 'Borrador'}
+                          </span>
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )
+              }
             </div>
             <div class="mt-4" data-list-panel="history" hidden>
               <p class="mb-3 max-w-prose text-muted">
@@ -278,7 +360,7 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
 </Base>
 
 <script>
-  import { WORDS_PER_SECOND } from '../../../lib/video-plan';
+  import { BULK_LIMITS, WORDS_PER_SECOND } from '../../../lib/video-plan';
 
   const root = document.querySelector<HTMLElement>('[data-studio]');
 
@@ -354,6 +436,7 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
       item.querySelector('[data-idea-angle]')!.textContent = idea.angle;
       item.classList.add('panel-in');
       lists.suggested.prepend(item);
+      refreshBulk();
     };
 
     suggestButton.addEventListener('click', async () => {
@@ -414,8 +497,80 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
         item.dataset.status = 'discarded';
         item.querySelector('[data-idea-status]')!.textContent = STATUS_LABELS.discarded;
         if (ideaId.value === item.dataset.id) ideaId.value = '';
+        const pick = item.querySelector<HTMLInputElement>('[data-pick]');
+        if (pick) pick.checked = false;
         lists.history.prepend(item);
         refreshLists();
+        refreshBulk();
+      }
+    });
+
+    // ---- Crear varios videos a la vez ----
+    const bulk = root.querySelector<HTMLElement>('[data-bulk]');
+    const bulkCount = root.querySelector<HTMLElement>('[data-bulk-count]');
+    const bulkPer = root.querySelector<HTMLSelectElement>('[data-bulk-per]');
+    const bulkRun = root.querySelector<HTMLButtonElement>('[data-bulk-run]');
+    const bulkStatus = root.querySelector<HTMLElement>('[data-bulk-status]');
+    const pickAll = root.querySelector<HTMLButtonElement>('[data-pick-all]');
+
+    const picks = () => all<HTMLInputElement>('[data-idea][data-status="suggested"] [data-pick]');
+    const refreshBulk = () => {
+      if (!bulk || !bulkCount || !bulkPer || !bulkRun) return;
+      const list = picks();
+      const chosen = list.filter((p) => p.checked);
+      for (const pick of list) {
+        pick.disabled = !pick.checked && chosen.length >= BULK_LIMITS.ideas;
+        pick.closest<HTMLElement>('[data-idea]')!.dataset.picked = String(pick.checked);
+      }
+      bulk.hidden = chosen.length === 0;
+      if (pickAll) pickAll.textContent = chosen.length === list.length && list.length > 0 ? 'Quitar selección' : 'Elegir todas';
+
+      // Cuántos videos por idea caben sin pasar del total.
+      const maxPer = Math.max(1, Math.min(BULK_LIMITS.perIdea, Math.floor(BULK_LIMITS.total / Math.max(1, chosen.length))));
+      const current = Math.min(Number(bulkPer.value) || 1, maxPer);
+      bulkPer.replaceChildren(
+        ...Array.from({ length: maxPer }, (_, i) => new Option(String(i + 1), String(i + 1), false, i + 1 === current)),
+      );
+      const videos = chosen.length * current;
+      bulkCount.textContent = `${chosen.length} ${chosen.length === 1 ? 'idea elegida' : 'ideas elegidas'}`;
+      bulkRun.textContent = `Crear ${videos} ${videos === 1 ? 'video' : 'videos'}`;
+    };
+
+    root.addEventListener('change', (event) => {
+      const target = event.target as HTMLElement;
+      if (target.matches('[data-pick], [data-bulk-per]')) refreshBulk();
+    });
+    pickAll?.addEventListener('click', () => {
+      const list = picks().slice(0, BULK_LIMITS.ideas);
+      const everyChecked = list.every((p) => p.checked);
+      for (const pick of picks()) pick.checked = false;
+      if (!everyChecked) for (const pick of list) pick.checked = true;
+      refreshBulk();
+    });
+
+    bulkRun?.addEventListener('click', async () => {
+      const chosen = picks().filter((p) => p.checked);
+      if (!chosen.length || !bulkStatus) return;
+      const data = new FormData();
+      data.set('project_id', projectId);
+      data.set('seconds', seconds.value);
+      data.set('per_idea', bulkPer!.value);
+      for (const pick of chosen) data.append('idea_ids', pick.closest<HTMLElement>('[data-idea]')!.dataset.id ?? '');
+
+      const total = chosen.length * Number(bulkPer!.value);
+      bulkRun.disabled = true;
+      bulkPer!.disabled = true;
+      for (const pick of picks()) pick.disabled = true;
+      bulkStatus.textContent = `Escribiendo ${total} ${total === 1 ? 'guion' : 'guiones'} y planeando sus visuales. Puede tardar varios minutos: no cierres la página.`;
+      try {
+        const response = await fetch('/api/videos/bulk', { method: 'POST', body: data });
+        // El servidor responde con un redirect a esta misma pantalla, con el resultado en la dirección.
+        location.assign(response.url);
+      } catch {
+        bulkStatus.textContent = 'Se perdió la conexión. Revisa la pestaña Videos por si alcanzaron a crearse.';
+        bulkRun.disabled = false;
+        bulkPer!.disabled = false;
+        refreshBulk();
       }
     });
 
@@ -428,5 +583,6 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
     });
 
     refreshSummary();
+    refreshBulk();
   }
 </script>

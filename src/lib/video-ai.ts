@@ -25,7 +25,7 @@ export type VisualType = (typeof VISUAL_TYPES)[number];
 
 export const VISUAL_LABELS: Record<VisualType, string> = {
   gemini_image: 'Imagen (Gemini)',
-  pexels_clip: 'Video (Pexels)',
+  pexels_clip: 'Video (Pixabay)',
 };
 
 /** Un tramo de narración. */

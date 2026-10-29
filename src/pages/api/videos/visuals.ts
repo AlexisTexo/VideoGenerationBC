@@ -9,7 +9,7 @@ import { canCreate } from '../../../lib/video-data';
 
 export const prerender = false;
 
-/** Reparte imágenes (Gemini) y videos (Pexels) sobre el guion ya escrito. */
+/** Reparte imágenes (Gemini) y videos (Pixabay) sobre el guion ya escrito. */
 export const POST: APIRoute = async ({ request, locals, redirect }) => {
   if (!canCreate(locals.role)) return new Response('Prohibido', { status: 403 });
 

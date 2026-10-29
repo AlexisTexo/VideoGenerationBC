@@ -2,6 +2,9 @@
 
 export const LIMITS = { minSeconds: 10, maxSeconds: 300, maxVisuals: 30 } as const;
 
+/** Tope al crear varios videos de golpe: ideas elegidas, videos por idea y total (cada uno cuesta llamadas a la IA). */
+export const BULK_LIMITS = { ideas: 8, perIdea: 3, total: 12 } as const;
+
 export const PRESET_SECONDS = [30, 45, 60, 90] as const;
 
 /** Velocidad de lectura de la voz, en palabras por segundo. */

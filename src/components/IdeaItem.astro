@@ -15,11 +15,21 @@ const action =
 ---
 
 <li
-  class="group rounded-xl border border-border bg-surface p-4 transition-colors data-[selected=true]:border-accent"
+  class="group rounded-xl border border-border bg-surface p-4 transition-colors data-[picked=true]:border-accent data-[selected=true]:border-accent"
   data-idea
   data-id={id}
   data-status={status}
 >
+  <div class="flex items-start gap-3">
+    <label class="-m-2 hidden shrink-0 cursor-pointer p-2 group-data-[status=suggested]:block">
+      <input
+        type="checkbox"
+        data-pick
+        aria-label="Elegir para crear varios videos"
+        class="block size-5 cursor-pointer accent-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
+      />
+    </label>
+    <div class="min-w-0 flex-1">
   <p class="font-semibold" data-idea-title>{title}</p>
   <p class="mt-1 text-muted" data-idea-angle>{angle}</p>
   <p class="mt-1 hidden text-sm text-muted group-data-[status=discarded]:block group-data-[status=used]:block" data-idea-status>
@@ -37,5 +47,7 @@ const action =
     >
       Descartar
     </button>
+  </div>
+    </div>
   </div>
 </li>
