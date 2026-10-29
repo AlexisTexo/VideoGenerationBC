@@ -1,0 +1,117 @@
+---
+import Base from '../../layouts/Base.astro';
+import AppHeader from '../../components/AppHeader.astro';
+import { ROLES, ROLE_LABELS, isRole } from '../../lib/roles';
+
+const { supabase, user } = Astro.locals;
+
+const { data: profiles, error: listError } = await supabase
+  .from('profiles')
+  .select('id, email, role, created_at')
+  .order('created_at', { ascending: true });
+
+const ok = Astro.url.searchParams.get('ok');
+const error = Astro.url.searchParams.get('error');
+
+const okMessages: Record<string, string> = {
+  created: 'Usuario creado. Ya puede entrar desde /login con su correo.',
+  role: 'Rol actualizado.',
+};
+const errorMessages: Record<string, string> = {
+  invalid: 'Revisa el correo y el rol.',
+  exists: 'Ese correo ya tiene cuenta.',
+  create: 'No se pudo crear el usuario.',
+  role: 'No se pudo cambiar el rol.',
+  self: 'No puedes cambiar tu propio rol.',
+};
+
+const field =
+  'h-10 rounded-lg border border-border bg-bg px-3 text-sm focus-visible:border-accent focus-visible:outline-2 focus-visible:outline-accent/40';
+---
+
+<Base title="Usuarios · VideoGeneratorBC">
+  <AppHeader />
+
+  <main class="mx-auto max-w-5xl px-4 py-10">
+    <h1 class="text-2xl font-semibold tracking-tight">Usuarios</h1>
+    <p class="mt-2 text-sm text-muted">
+      Solo entran las personas que crees aquí. Reciben acceso con un enlace a su correo.
+    </p>
+
+    {
+      ok && okMessages[ok] && (
+        <p role="status" class="mt-6 rounded-lg border border-border bg-surface px-4 py-3 text-sm text-ok">
+          {okMessages[ok]}
+        </p>
+      )
+    }
+    {
+      error && (
+        <p role="alert" class="mt-6 rounded-lg border border-border bg-surface px-4 py-3 text-sm text-danger">
+          {errorMessages[error] ?? 'Algo salió mal.'}
+        </p>
+      )
+    }
+
+    <section class="mt-8 rounded-2xl border border-border bg-surface p-5">
+      <h2 class="text-sm font-semibold">Crear usuario</h2>
+      <form method="post" action="/api/admin/users/create" class="mt-4 flex flex-col gap-3 sm:flex-row">
+        <label class="sr-only" for="new-email">Correo</label>
+        <input
+          id="new-email"
+          name="email"
+          type="email"
+          required
+          autocomplete="off"
+          placeholder="correo@empresa.com"
+          class={`${field} flex-1`}
+        />
+        <label class="sr-only" for="new-role">Rol</label>
+        <select id="new-role" name="role" class={field}>
+          {ROLES.map((r) => <option value={r} selected={r === 'editor'}>{ROLE_LABELS[r]}</option>)}
+        </select>
+        <button
+          type="submit"
+          class="h-10 rounded-lg bg-accent px-4 text-sm font-semibold text-accent-fg hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+        >
+          Crear
+        </button>
+      </form>
+    </section>
+
+    <section class="mt-8">
+      <h2 class="text-sm font-semibold">Equipo</h2>
+      {listError && <p class="mt-3 text-sm text-danger">No se pudo cargar la lista.</p>}
+      <ul class="mt-3 divide-y divide-border rounded-2xl border border-border bg-surface">
+        {
+          profiles?.map((p) => (
+            <li class="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <span class="text-sm">
+                {p.email}
+                {p.id === user?.id && <span class="ml-2 text-xs text-muted">(tú)</span>}
+              </span>
+              <form method="post" action="/api/admin/users/role" class="flex items-center gap-2">
+                <input type="hidden" name="id" value={p.id} />
+                <label class="sr-only" for={`role-${p.id}`}>Rol de {p.email}</label>
+                <select id={`role-${p.id}`} name="role" class={field} disabled={p.id === user?.id}>
+                  {ROLES.map((r) => (
+                    <option value={r} selected={isRole(p.role) && r === p.role}>
+                      {ROLE_LABELS[r]}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  disabled={p.id === user?.id}
+                  class="h-10 rounded-lg border border-border px-3 text-sm font-medium hover:bg-bg disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                >
+                  Guardar
+                </button>
+              </form>
+            </li>
+          ))
+        }
+      </ul>
+    </section>
+  </main>
+</Base>
