@@ -19,12 +19,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   const { supabase } = locals;
+  // Si la voz ya está guardada, se conserva su nombre (puede haberlo cambiado el usuario).
+  const { data: existing } = await supabase.from('voices').select('name').eq('voice_id', voiceId).maybeSingle();
   const previewUrl = await storePreview(supabase, voiceId, result.voice.previewUrl);
 
   const { data, error } = await supabase
     .from('voices')
     .upsert(
-      { voice_id: voiceId, name: result.voice.name.slice(0, 100), preview_url: previewUrl },
+      { voice_id: voiceId, name: (existing?.name || result.voice.name).slice(0, 100), preview_url: previewUrl },
       { onConflict: 'voice_id' },
     )
     .select(VOICE_COLUMNS)

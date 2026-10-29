@@ -85,7 +85,8 @@ export async function rememberVoice(supabase: SupabaseClient, voiceId: string, f
     }
 
     const found = await lookupVoice(voiceId);
-    const name = (found.ok ? found.voice.name : '') || existing?.name || fallbackName;
+    // Un nombre ya guardado (por ejemplo, el que puso el usuario) tiene prioridad sobre el de ElevenLabs.
+    const name = existing?.name || (found.ok ? found.voice.name : '') || fallbackName;
     const preview = found.ok ? await storePreview(supabase, voiceId, found.voice.previewUrl) : (existing?.preview_url ?? '');
     const row = { name: name.slice(0, 100), preview_url: preview, last_used_at: now };
 

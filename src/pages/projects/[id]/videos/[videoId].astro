@@ -1179,6 +1179,66 @@ const field =
       const play = target.closest<HTMLElement>('[data-item-play]');
       if (play && item.dataset.preview) toggleSample(play, item.dataset.preview);
 
+      if (target.closest('[data-item-rename]') && !item.querySelector('[data-rename-input]')) {
+        const label = item.querySelector<HTMLElement>('[data-item-name]')!;
+        const input = document.createElement('input');
+        input.value = item.dataset.name ?? '';
+        input.maxLength = 100;
+        input.placeholder = 'Nombre de la voz';
+        input.setAttribute('aria-label', 'Nombre de la voz');
+        input.dataset.renameInput = '';
+        input.className =
+          'h-9 w-full rounded-lg border border-border bg-bg px-3 text-base font-semibold focus-visible:border-focus';
+        label.hidden = true;
+        label.after(input);
+        input.focus();
+        input.select();
+
+        let finished = false;
+        const close = () => {
+          finished = true;
+          input.remove();
+          label.hidden = false;
+        };
+        const commit = async () => {
+          if (finished) return;
+          const name = input.value.trim();
+          if (!name || name === item.dataset.name) return close();
+          finished = true;
+          input.disabled = true;
+          try {
+            const response = await fetch('/api/voices/rename', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ id: item.dataset.id, name }),
+            });
+            const data = await response.json();
+            if (response.ok) {
+              fillItem(item, data.voice);
+              // Si es la voz que está en el formulario, también se actualiza su nombre.
+              if (voiceInput.value.trim() === data.voice.voice_id) voiceName.value = data.voice.name;
+            } else {
+              voiceStatus.textContent = 'No se pudo cambiar el nombre. Revisa que la migración esté aplicada.';
+            }
+          } catch {
+            voiceStatus.textContent = 'No se pudo cambiar el nombre.';
+          }
+          input.remove();
+          label.hidden = false;
+        };
+
+        input.addEventListener('keydown', (keyEvent) => {
+          if (keyEvent.key === 'Enter') {
+            keyEvent.preventDefault();
+            void commit();
+          } else if (keyEvent.key === 'Escape') {
+            keyEvent.preventDefault();
+            close();
+          }
+        });
+        input.addEventListener('blur', () => void commit());
+      }
+
       if (target.closest('[data-item-refresh]')) {
         const refresh = target.closest<HTMLButtonElement>('[data-item-refresh]')!;
         refresh.disabled = true;
