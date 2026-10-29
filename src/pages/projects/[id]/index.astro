@@ -11,6 +11,7 @@ import { canCreate, loadIdeas } from '../../../lib/video-data';
 
 const { supabase, role } = Astro.locals;
 const canEdit = canCreate(role);
+const isAdmin = role === 'admin';
 
 const { id } = Astro.params;
 if (!id || !isUuid(id)) {
@@ -65,6 +66,7 @@ const errorMessages: Record<string, string> = {
   bulk_pick: 'Elige al menos una idea sugerida.',
   bulk_limit: `Máximo ${BULK_LIMITS.ideas} ideas, ${BULK_LIMITS.perIdea} videos por idea y ${BULK_LIMITS.total} videos en total.`,
   bulk_ai: 'No se pudo escribir ningún guion. Intenta de nuevo en un momento.',
+  video_delete: 'No se pudo eliminar el video. Intenta de nuevo.',
   bulk_save: 'Los guiones se escribieron, pero no se pudieron guardar los videos.',
 };
 
@@ -122,6 +124,7 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
     {!canEdit && <p class="mt-6 text-muted">Tu rol solo permite ver este proyecto.</p>}
     {prefsReset && <p role="status" class="mt-6 text-ok">Preferencias restablecidas.</p>}
     {bulkOk && <p role="status" class="mt-6 text-ok">{bulkOk}</p>}
+    {param('ok') === 'video_deleted' && <p role="status" class="mt-6 text-ok">Video eliminado con todo lo suyo.</p>}
 
     <form
       id="studio-form"
@@ -232,8 +235,8 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
                 ) : (
                   <ul class="divide-y divide-border rounded-xl border border-border bg-surface">
                     {videos.map((v) => (
-                      <li>
-                        <a href={`/projects/${project.id}/videos/${v.id}`} class="flex flex-wrap items-center justify-between gap-x-6 gap-y-1 px-4 py-3 transition-colors hover:bg-bg">
+                      <li class="flex items-center transition-colors hover:bg-bg">
+                        <a href={`/projects/${project.id}/videos/${v.id}`} class="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-6 gap-y-1 px-4 py-3">
                           <span class="min-w-0 font-medium">
                             {v.title || 'Guion sin título'}
                             {v.parent_video_id && <span class="ml-2 text-sm font-normal text-muted">Variante</span>}
@@ -242,6 +245,21 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
                             {v.generated_at ? 'Contenidos generados' : v.script_approved ? 'Guion aprobado' : 'Borrador'}
                           </span>
                         </a>
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            data-delete-video
+                            data-id={v.id}
+                            data-title={v.title || 'Guion sin título'}
+                            class="mr-3 grid size-10 shrink-0 place-items-center rounded-lg text-muted transition-[color,background-color,transform] duration-150 ease-out hover:bg-surface hover:text-danger active:scale-[0.95]"
+                            aria-label={`Eliminar ${v.title || 'el video'}`}
+                            title="Eliminar video"
+                          >
+                            <svg viewBox="0 0 24 24" class="size-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                              <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" />
+                            </svg>
+                          </button>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -352,6 +370,41 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
     <form id="prefs-form" method="post" action="/api/preferences">
       <input type="hidden" name="project_id" value={project.id} />
     </form>
+
+    {
+      isAdmin && (
+        <dialog
+          data-video-dialog
+          aria-labelledby="video-delete-title"
+          class="m-auto w-[min(28rem,calc(100vw-2rem))] rounded-2xl border border-border bg-surface p-6 text-text backdrop:bg-black/60"
+        >
+          <form method="post" action="/api/videos/delete">
+            <input type="hidden" name="video_id" value="" data-video-delete-id />
+            <h2 id="video-delete-title" class="text-xl font-semibold tracking-tight">¿Eliminar este video?</h2>
+            <p class="mt-2 font-medium" data-video-delete-title></p>
+            <p class="mt-2 text-muted">
+              Se borran su guion, todas sus generaciones, sus entregas y todos sus archivos. No se puede deshacer.
+            </p>
+            <div class="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                data-video-delete-cancel
+                class="inline-flex h-11 items-center rounded-xl border border-border bg-bg px-5 font-semibold transition-[background-color,transform] duration-150 ease-out hover:bg-surface active:scale-[0.97]"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                data-video-delete-confirm
+                class="inline-flex h-11 items-center rounded-xl bg-danger px-5 font-semibold text-bg transition-[opacity,transform] duration-150 ease-out hover:opacity-90 active:scale-[0.97]"
+              >
+                Eliminar video
+              </button>
+            </div>
+          </form>
+        </dialog>
+      )
+    }
 
     <template data-idea-template>
       <IdeaItem />
@@ -573,6 +626,29 @@ const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
         refreshBulk();
       }
     });
+
+    // ---- Eliminar un video (solo administrador) ----
+    const videoDialog = root.querySelector<HTMLDialogElement>('[data-video-dialog]');
+    if (videoDialog) {
+      for (const button of all<HTMLButtonElement>('[data-delete-video]')) {
+        button.addEventListener('click', () => {
+          videoDialog.querySelector<HTMLInputElement>('[data-video-delete-id]')!.value = button.dataset.id ?? '';
+          videoDialog.querySelector('[data-video-delete-title]')!.textContent = button.dataset.title ?? '';
+          videoDialog.showModal();
+        });
+      }
+      videoDialog.querySelector('[data-video-delete-cancel]')!.addEventListener('click', () => videoDialog.close());
+      videoDialog.addEventListener('click', (event) => {
+        if (event.target === videoDialog) videoDialog.close();
+      });
+      videoDialog.querySelector('[data-video-delete-confirm]')!.addEventListener('click', (event) => {
+        const button = event.currentTarget as HTMLButtonElement;
+        requestAnimationFrame(() => {
+          button.disabled = true;
+          button.textContent = 'Eliminando…';
+        });
+      });
+    }
 
     // Escribir el guion tarda: se avisa y se evita el doble envío.
     q<HTMLFormElement>('[data-studio-form]').addEventListener('submit', () => {

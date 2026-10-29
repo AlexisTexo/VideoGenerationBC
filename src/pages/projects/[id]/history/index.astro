@@ -4,10 +4,12 @@ import AppHeader from '../../../../components/AppHeader.astro';
 import ProjectLogo from '../../../../components/ProjectLogo.astro';
 import { GENERATION_COLUMNS, KIND_LABELS, generationCode, type Generation, type GenerationSnapshot } from '../../../../lib/generations';
 import { isUuid } from '../../../../lib/projects';
+import { canCreate } from '../../../../lib/video-data';
 import { assetProgress, normalizeAssets } from '../../../../lib/video-assets';
 import { isFormatId, type FormatId } from '../../../../lib/video-format';
 
-const { supabase } = Astro.locals;
+const { supabase, role } = Astro.locals;
+const canDelete = canCreate(role);
 const { id } = Astro.params;
 if (!id || !isUuid(id)) {
   return new Response('No encontrado', { status: 404 });
@@ -49,6 +51,15 @@ const { data: signed } = paths.length
   : { data: [] };
 const urlByPath = new Map((signed ?? []).map((s) => [s.path ?? '', s.signedUrl]));
 
+const okParam = Astro.url.searchParams.get('ok');
+const problem = Astro.url.searchParams.get('error');
+const deletedN = Number(Astro.url.searchParams.get('n')) || 0;
+const errorMessages: Record<string, string> = {
+  delete_pick: 'Marca al menos una generación para eliminar.',
+  delete_current: 'La generación vigente de un video no se elimina aquí. Para quitar el video completo, elimínalo desde la pestaña Videos del proyecto.',
+  delete_failed: 'No se pudo eliminar. Intenta de nuevo.',
+};
+
 const when = (iso: string) =>
   new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'America/Mexico_City' });
 ---
@@ -78,11 +89,47 @@ const when = (iso: string) =>
       </p>
     )}
 
+    {
+      okParam === 'deleted' && (
+        <p role="status" class="mt-6 text-ok">
+          {deletedN} {deletedN === 1 ? 'generación eliminada' : 'generaciones eliminadas'} con sus archivos.
+          {Astro.url.searchParams.get('skipped') ? ' La vigente se conservó.' : ''}
+        </p>
+      )
+    }
+    {problem && <p role="alert" class="mt-6 text-danger">{errorMessages[problem] ?? 'Algo salió mal.'}</p>}
+
     {!error && rows.length === 0 && <p class="mt-10 text-muted">Aún no hay generaciones. Aparecerán al generar los contenidos de un video.</p>}
 
     {
       rows.length > 0 && (
-        <ol class="mt-8 divide-y divide-border rounded-2xl border border-border bg-surface">
+        <form id="delete-form" method="post" action="/api/history/delete" data-history>
+          <input type="hidden" name="project_id" value={project.id} />
+          {videoFilter && isUuid(videoFilter) && <input type="hidden" name="video" value={videoFilter} />}
+
+          {canDelete && (
+            <div class="mt-8 flex flex-wrap items-center justify-between gap-3">
+              <button
+                type="button"
+                data-pick-all
+                class="h-10 rounded-lg px-3 font-medium text-muted transition-colors hover:text-text"
+              >
+                Elegir todas
+              </button>
+              <div class="flex items-center gap-3" data-delete-bar hidden>
+                <p class="text-muted" data-delete-count aria-live="polite"></p>
+                <button
+                  type="button"
+                  data-delete-open
+                  class="inline-flex h-10 items-center rounded-lg border border-danger px-4 font-semibold text-danger transition-[background-color,transform] duration-150 ease-out hover:bg-danger/10 active:scale-[0.97]"
+                >
+                  Eliminar
+                </button>
+              </div>
+            </div>
+          )}
+
+        <ol class:list={[canDelete ? 'mt-3' : 'mt-8', 'divide-y divide-border rounded-2xl border border-border bg-surface']}>
           {rows.map((row) => {
             const snap = row.snapshot;
             const formats = ((snap?.formats ?? ['9:16']) as unknown[]).filter(isFormatId) as FormatId[];
@@ -91,6 +138,19 @@ const when = (iso: string) =>
             const code = generationCode(row.number);
             return (
               <li class="relative flex flex-wrap items-center gap-x-5 gap-y-3 px-5 py-4 transition-colors hover:bg-bg">
+                {canDelete && (
+                  <label class="relative z-10 -m-2 shrink-0 cursor-pointer p-2" title={currentIds.has(row.id) ? 'La vigente no se elimina aquí' : `Elegir ${code}`}>
+                    <input
+                      type="checkbox"
+                      name="generation_ids"
+                      value={row.id}
+                      disabled={currentIds.has(row.id)}
+                      aria-label={`Elegir ${code} para eliminar`}
+                      class="block size-5 cursor-pointer accent-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-40"
+                      data-pick
+                    />
+                  </label>
+                )}
                 <div class="flex w-36 shrink-0 gap-1" aria-hidden="true">
                   {thumbs.length ? (
                     thumbs.map((src) => <img src={src} alt="" loading="lazy" class="h-14 w-8 rounded-md border border-border object-cover" />)
@@ -132,7 +192,89 @@ const when = (iso: string) =>
             );
           })}
         </ol>
+        </form>
+      )
+    }
+
+    {
+      canDelete && (
+        <dialog
+          data-delete-dialog
+          aria-labelledby="delete-title"
+          class="m-auto w-[min(28rem,calc(100vw-2rem))] rounded-2xl border border-border bg-surface p-6 text-text backdrop:bg-black/60"
+        >
+          <h2 id="delete-title" class="text-xl font-semibold tracking-tight">¿Eliminar del historial?</h2>
+          <p class="mt-2 text-muted" data-delete-text></p>
+          <p class="mt-2 text-muted">Se borran también sus archivos y no se puede deshacer. La generación vigente de cada video se conserva.</p>
+          <div class="mt-6 flex justify-end gap-3">
+            <button
+              type="button"
+              data-delete-cancel
+              class="inline-flex h-11 items-center rounded-xl border border-border bg-bg px-5 font-semibold transition-[background-color,transform] duration-150 ease-out hover:bg-surface active:scale-[0.97]"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              form="delete-form"
+              data-delete-confirm
+              class="inline-flex h-11 items-center rounded-xl bg-danger px-5 font-semibold text-bg transition-[opacity,transform] duration-150 ease-out hover:opacity-90 active:scale-[0.97]"
+            >
+              Eliminar
+            </button>
+          </div>
+        </dialog>
       )
     }
   </main>
 </Base>
+
+<script>
+  const root = document.querySelector<HTMLFormElement>('[data-history]');
+  const dialog = document.querySelector<HTMLDialogElement>('[data-delete-dialog]');
+
+  if (root && dialog) {
+    const picks = () => [...root.querySelectorAll<HTMLInputElement>('[data-pick]:not(:disabled)')];
+    const bar = root.querySelector<HTMLElement>('[data-delete-bar]')!;
+    const count = root.querySelector<HTMLElement>('[data-delete-count]')!;
+    const pickAll = root.querySelector<HTMLButtonElement>('[data-pick-all]')!;
+
+    const refresh = () => {
+      const chosen = picks().filter((p) => p.checked).length;
+      bar.hidden = chosen === 0;
+      count.textContent = `${chosen} ${chosen === 1 ? 'elegida' : 'elegidas'}`;
+      pickAll.textContent = chosen > 0 && chosen === picks().length ? 'Quitar selección' : 'Elegir todas';
+    };
+
+    root.addEventListener('change', (event) => {
+      if ((event.target as HTMLElement).matches('[data-pick]')) refresh();
+    });
+    pickAll.addEventListener('click', () => {
+      const all = picks();
+      const every = all.length > 0 && all.every((p) => p.checked);
+      for (const pick of all) pick.checked = !every;
+      refresh();
+    });
+
+    root.querySelector('[data-delete-open]')!.addEventListener('click', () => {
+      const chosen = picks().filter((p) => p.checked).length;
+      if (!chosen) return;
+      dialog.querySelector('[data-delete-text]')!.textContent =
+        chosen === 1 ? 'Vas a eliminar 1 generación.' : `Vas a eliminar ${chosen} generaciones.`;
+      dialog.showModal();
+    });
+    dialog.querySelector('[data-delete-cancel]')!.addEventListener('click', () => dialog.close());
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog) dialog.close();
+    });
+    dialog.querySelector('[data-delete-confirm]')!.addEventListener('click', (event) => {
+      const button = event.currentTarget as HTMLButtonElement;
+      requestAnimationFrame(() => {
+        button.disabled = true;
+        button.textContent = 'Eliminando…';
+      });
+    });
+
+    refresh();
+  }
+</script>
