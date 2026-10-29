@@ -30,10 +30,10 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
   if (logo.kind === 'upload') {
     const url = await uploadLogo(locals.supabase, created.id, logo);
     if (!url) {
-      return redirect(`/projects/${created.id}?error=logo`, 303);
+      return redirect(`/projects/${created.id}/settings?section=producto&error=logo`, 303);
     }
     await locals.supabase.from('projects').update({ logo_url: url }).eq('id', created.id);
   }
 
-  return redirect(`/projects/${created.id}?ok=1`, 303);
+  return redirect(`/projects/${created.id}`, 303);
 };

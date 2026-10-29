@@ -19,7 +19,7 @@ const { data: projects, error } = await supabase
     <div class="rise flex flex-wrap items-end justify-between gap-4" style="--i: 0">
       <div>
         <h1 class="text-3xl font-semibold tracking-tight">Proyectos</h1>
-        <p class="mt-2 text-muted">Elige un proyecto para ver o editar su marca, voz y contenido.</p>
+        <p class="mt-2 text-muted">Elige un proyecto para crear un video. Con “Editar” ajustas su marca, contenido y conocimiento.</p>
       </div>
       {
         canEdit && (
@@ -47,10 +47,11 @@ const { data: projects, error } = await supabase
       projects && projects.length > 0 && (
         <ul class="rise mt-10 divide-y divide-border rounded-2xl border border-border bg-surface" style="--i: 1">
           {projects.map((p) => (
-            <li>
+            <li class="flex items-center gap-2 pr-4 transition-colors hover:bg-bg first:rounded-t-2xl last:rounded-b-2xl">
               <a
                 href={`/projects/${p.id}`}
-                class="flex items-center gap-4 px-5 py-4 transition-colors hover:bg-bg first:rounded-t-2xl last:rounded-b-2xl"
+                class="flex min-w-0 flex-1 items-center gap-4 py-4 pl-5 pr-2"
+                aria-label={`Crear un video de ${p.name}`}
               >
                 <ProjectLogo name={p.name} logoUrl={p.logo_url} />
                 <span class="min-w-0 flex-1">
@@ -58,6 +59,15 @@ const { data: projects, error } = await supabase
                   {p.description && <span class="mt-0.5 line-clamp-2 text-muted">{p.description}</span>}
                 </span>
               </a>
+              {canEdit && (
+                <a
+                  href={`/projects/${p.id}/settings`}
+                  class="inline-flex h-10 shrink-0 items-center rounded-lg border border-border bg-surface px-4 font-medium transition-[background-color,transform] hover:bg-bg active:scale-[0.98]"
+                  aria-label={`Editar ${p.name}`}
+                >
+                  Editar
+                </a>
+              )}
             </li>
           ))}
         </ul>

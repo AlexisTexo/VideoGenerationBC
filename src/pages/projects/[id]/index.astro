@@ -1,0 +1,370 @@
+---
+import Base from '../../../layouts/Base.astro';
+import AppHeader from '../../../components/AppHeader.astro';
+import ProjectLogo from '../../../components/ProjectLogo.astro';
+import IdeaItem from '../../../components/IdeaItem.astro';
+import { PROJECT_COLUMNS, isUuid, type Project } from '../../../lib/projects';
+import { DURATIONS } from '../../../lib/video-ai';
+import { canCreate, loadIdeas } from '../../../lib/video-data';
+
+const { supabase, role } = Astro.locals;
+const canEdit = canCreate(role);
+
+const { id } = Astro.params;
+if (!id || !isUuid(id)) {
+  return new Response('No encontrado', { status: 404 });
+}
+
+const { data, error: loadError } = await supabase.from('projects').select(PROJECT_COLUMNS).eq('id', id).maybeSingle();
+if (loadError) {
+  console.error('cargar proyecto falló:', loadError.code, loadError.message);
+  return new Response('No se pudo cargar el proyecto. Revisa que las migraciones estén aplicadas.', { status: 500 });
+}
+const project = data as unknown as Project | null;
+if (!project) {
+  return new Response('No encontrado', { status: 404 });
+}
+
+const ideas = await loadIdeas(supabase, id);
+const suggested = ideas.filter((i) => i.status === 'suggested');
+const history = ideas.filter((i) => i.status !== 'suggested');
+
+// La voz del último video queda como punto de partida.
+const { data: lastVideo, error: videosError } = await supabase
+  .from('videos')
+  .select('voice_id, voice_name')
+  .eq('project_id', id)
+  .neq('voice_id', '')
+  .order('created_at', { ascending: false })
+  .limit(1)
+  .maybeSingle();
+const needsMigration = Boolean(videosError);
+
+const error = Astro.url.searchParams.get('error');
+const errorMessages: Record<string, string> = {
+  idea: 'Escribe tu idea (mínimo 5 caracteres) o pide ideas con “Dame ideas”.',
+  ai: 'No se pudo escribir el guion. Intenta de nuevo.',
+  config: 'Falta configurar GEMINI_API_KEY en el archivo .env del servidor.',
+  save: 'El guion se escribió, pero no se pudo guardar el video.',
+};
+
+const input =
+  'h-12 w-full rounded-lg border border-border bg-bg px-4 text-base focus-visible:border-focus disabled:opacity-60';
+const secondary =
+  'h-12 shrink-0 rounded-lg border border-border bg-surface px-5 text-base font-semibold transition-[background-color,transform] hover:bg-bg active:scale-[0.98] disabled:opacity-60';
+---
+
+<Base title={`Nuevo video · ${project.name}`}>
+  <AppHeader />
+
+  <main class="mx-auto max-w-2xl px-4 py-10" data-studio data-project-id={project.id}>
+    <a href="/" class="text-muted transition-colors hover:text-text">← Proyectos</a>
+
+    <div class="mt-4 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-4">
+        <ProjectLogo name={project.name} logoUrl={project.logo_url} class="size-14" />
+        <div>
+          <h1 class="text-3xl font-semibold tracking-tight">Nuevo video</h1>
+          <p class="text-muted">{project.name}</p>
+        </div>
+      </div>
+      {
+        canEdit && (
+          <a
+            href={`/projects/${project.id}/settings`}
+            class="inline-flex h-10 items-center rounded-lg border border-border bg-surface px-4 font-medium transition-[background-color,transform] hover:bg-bg active:scale-[0.98]"
+          >
+            Editar proyecto
+          </a>
+        )
+      }
+    </div>
+
+    {
+      needsMigration && (
+        <p role="alert" class="mt-6 text-danger">
+          Faltan las tablas de ideas y videos. Aplica la migración 0006 en Supabase.
+        </p>
+      )
+    }
+    {
+      error && (
+        <p role="alert" class="mt-6 text-danger">
+          {errorMessages[error] ?? 'Algo salió mal.'}
+        </p>
+      )
+    }
+    {!canEdit && <p class="mt-6 text-muted">Tu rol solo permite ver este proyecto.</p>}
+
+    <form method="post" action="/api/videos/create" class="mt-10 space-y-12" data-studio-form>
+      <input type="hidden" name="project_id" value={project.id} />
+      <input type="hidden" name="idea_id" value="" data-idea-id />
+      <input type="hidden" name="voice_name" value={lastVideo?.voice_name ?? ''} data-voice-name />
+
+      <fieldset disabled={!canEdit || needsMigration} class="space-y-12">
+        <section class="space-y-4">
+          <div>
+            <h2 class="text-xl font-semibold tracking-tight">Voz</h2>
+            <p class="mt-2 text-muted">
+              Pega el ID de la voz de ElevenLabs y escúchala. Es opcional: puedes elegirla después.
+            </p>
+          </div>
+          <div class="flex gap-3">
+            <label class="sr-only" for="voice_id">ID de voz (ElevenLabs)</label>
+            <input
+              id="voice_id"
+              name="voice_id"
+              maxlength="40"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="ID de voz"
+              value={lastVideo?.voice_id ?? ''}
+              class={input}
+              data-voice-id
+            />
+            <button type="button" class={secondary} data-voice-preview>Escuchar</button>
+          </div>
+          <p class="text-muted" data-voice-status aria-live="polite">
+            {lastVideo?.voice_name ? `Última voz usada: ${lastVideo.voice_name}` : ''}
+          </p>
+          <audio controls hidden class="w-full" data-voice-audio></audio>
+        </section>
+
+        <section class="space-y-4">
+          <div>
+            <h2 class="text-xl font-semibold tracking-tight">Idea</h2>
+            <p class="mt-2 text-muted">
+              Cuéntame la idea general. Si no tienes una, pide ideas: tomo en cuenta el proyecto y lo que ya se hizo.
+            </p>
+          </div>
+          <div>
+            <label for="idea" class="mb-2 block font-medium">Tu idea</label>
+            <textarea
+              id="idea"
+              name="idea"
+              rows="4"
+              minlength="5"
+              maxlength="2000"
+              placeholder="Por ejemplo: mostrar cómo un supervisor detecta un rondín omitido en segundos"
+              class="min-h-28 w-full rounded-lg border border-border bg-bg px-4 py-3 text-base focus-visible:border-focus disabled:opacity-60"
+              data-idea-text></textarea>
+          </div>
+          <div class="flex flex-wrap items-center gap-4">
+            <button type="button" class={secondary} data-suggest>Dame ideas</button>
+            <p class="text-muted" data-suggest-status aria-live="polite"></p>
+          </div>
+
+          <div class="pt-2">
+            <h3 class="font-semibold">
+              Ideas sugeridas <span class="font-normal text-muted" data-count="suggested">({suggested.length})</span>
+            </h3>
+            <ul class="mt-1 divide-y divide-border" data-ideas="suggested">
+              {suggested.map((i) => <IdeaItem {...i} />)}
+            </ul>
+            <p class="mt-2 text-muted" data-empty="suggested" hidden={suggested.length > 0}>
+              No hay ideas pendientes. Pulsa “Dame ideas”.
+            </p>
+          </div>
+        </section>
+
+        <section class="space-y-4">
+          <div>
+            <h2 class="text-xl font-semibold tracking-tight">Duración</h2>
+            <p class="mt-2 text-muted">El guion se divide en escenas con el segundo exacto de cada una.</p>
+          </div>
+          <label class="sr-only" for="seconds">Duración del video</label>
+          <select id="seconds" name="seconds" class={`${input} sm:max-w-xs`}>
+            {DURATIONS.map((s) => <option value={s} selected={s === 45}>{s} segundos</option>)}
+          </select>
+        </section>
+      </fieldset>
+
+      {
+        canEdit && (
+          <div class="sticky bottom-0 -mx-4 border-t border-border bg-bg/95 px-4 py-4">
+            <button
+              type="submit"
+              disabled={needsMigration}
+              class="h-12 w-full rounded-lg bg-accent px-6 text-base font-semibold text-accent-fg transition-[background-color,transform] hover:bg-accent-hover active:scale-[0.98] disabled:opacity-60 sm:w-auto"
+              data-submit
+            >
+              Escribir guion
+            </button>
+          </div>
+        )
+      }
+    </form>
+
+    <details class="mt-12 border-t border-border pt-8" open={history.length > 0}>
+      <summary class="cursor-pointer text-xl font-semibold tracking-tight">
+        Historial de ideas <span class="font-normal text-muted" data-count="history">({history.length})</span>
+      </summary>
+      <p class="mt-2 text-muted">
+        Lo que ya se usó o se descartó. La IA no lo repite; si reutilizas una, la modifica para que se sienta distinta.
+      </p>
+      <ul class="mt-2 divide-y divide-border" data-ideas="history">
+        {history.map((i) => <IdeaItem {...i} />)}
+      </ul>
+      <p class="mt-2 text-muted" data-empty="history" hidden={history.length > 0}>Aún no hay historial.</p>
+    </details>
+
+    <template data-idea-template>
+      <IdeaItem />
+    </template>
+  </main>
+</Base>
+
+<script>
+  const root = document.querySelector<HTMLElement>('[data-studio]');
+
+  if (root) {
+    const q = <T extends HTMLElement>(selector: string) => root.querySelector<T>(selector)!;
+    const projectId = root.dataset.projectId!;
+
+    const voiceInput = q<HTMLInputElement>('[data-voice-id]');
+    const voiceName = q<HTMLInputElement>('[data-voice-name]');
+    const voiceStatus = q('[data-voice-status]');
+    const voiceAudio = q<HTMLAudioElement>('[data-voice-audio]');
+    const voiceButton = q<HTMLButtonElement>('[data-voice-preview]');
+
+    const ideaText = q<HTMLTextAreaElement>('[data-idea-text]');
+    const ideaId = q<HTMLInputElement>('[data-idea-id]');
+    const suggestButton = q<HTMLButtonElement>('[data-suggest]');
+    const suggestStatus = q('[data-suggest-status]');
+    const template = q<HTMLTemplateElement>('[data-idea-template]');
+    const lists = {
+      suggested: q('[data-ideas="suggested"]'),
+      history: q('[data-ideas="history"]'),
+    };
+
+    const STATUS_LABELS: Record<string, string> = { suggested: 'Sugerida', used: 'Usada', discarded: 'Descartada' };
+
+    const refresh = () => {
+      for (const key of ['suggested', 'history'] as const) {
+        const total = lists[key].children.length;
+        q(`[data-count="${key}"]`).textContent = `(${total})`;
+        q(`[data-empty="${key}"]`).hidden = total > 0;
+      }
+    };
+
+    // ---- Vista previa de voz ----
+    voiceButton.addEventListener('click', async () => {
+      const id = voiceInput.value.trim();
+      if (!id) {
+        voiceStatus.textContent = 'Escribe un ID de voz.';
+        return;
+      }
+      voiceButton.disabled = true;
+      voiceStatus.textContent = 'Buscando la voz…';
+      try {
+        const response = await fetch(`/api/elevenlabs/voice?id=${encodeURIComponent(id)}`);
+        const data = await response.json();
+        if (!response.ok) {
+          const messages: Record<string, string> = {
+            invalid: 'Ese ID no tiene un formato válido.',
+            not_found: 'No encontramos esa voz en tu cuenta de ElevenLabs.',
+            config: 'Falta ELEVENLABS_API_KEY en el .env del servidor. Puedes guardar el ID igual.',
+            auth: 'ElevenLabs rechazó la clave. Revisa ELEVENLABS_API_KEY.',
+          };
+          voiceStatus.textContent = messages[data.error] ?? 'No se pudo consultar ElevenLabs.';
+          voiceAudio.hidden = true;
+          return;
+        }
+        voiceName.value = data.name ?? '';
+        if (data.previewUrl) {
+          voiceStatus.textContent = `Voz: ${data.name}`;
+          voiceAudio.src = data.previewUrl;
+          voiceAudio.hidden = false;
+          voiceAudio.play().catch(() => {});
+        } else {
+          voiceStatus.textContent = `Voz: ${data.name} (sin muestra de audio disponible)`;
+          voiceAudio.hidden = true;
+        }
+      } catch {
+        voiceStatus.textContent = 'No se pudo consultar ElevenLabs.';
+      } finally {
+        voiceButton.disabled = false;
+      }
+    });
+
+    // ---- Ideas ----
+    const addIdea = (idea: { id: string; title: string; angle: string; status: string }) => {
+      const item = (template.content.cloneNode(true) as DocumentFragment).querySelector<HTMLElement>('[data-idea]')!;
+      item.dataset.id = idea.id;
+      item.dataset.status = idea.status;
+      item.querySelector('[data-idea-title]')!.textContent = idea.title;
+      item.querySelector('[data-idea-angle]')!.textContent = idea.angle;
+      item.classList.add('panel-in');
+      lists.suggested.prepend(item);
+    };
+
+    suggestButton.addEventListener('click', async () => {
+      suggestButton.disabled = true;
+      suggestButton.textContent = 'Pensando…';
+      suggestStatus.textContent = '';
+      try {
+        const response = await fetch('/api/ideas/suggest', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ project_id: projectId, direction: ideaText.value }),
+        });
+        const data = await response.json();
+        if (!response.ok) {
+          suggestStatus.textContent =
+            data.error === 'config'
+              ? 'Falta GEMINI_API_KEY en el .env del servidor.'
+              : 'No se pudieron generar ideas. Intenta de nuevo.';
+          return;
+        }
+        for (const idea of [...data.ideas].reverse()) addIdea(idea);
+        suggestStatus.textContent = data.ideas.length
+          ? `${data.ideas.length} ideas nuevas.`
+          : 'Todas las ideas se parecían al historial. Prueba con otra dirección.';
+        refresh();
+      } catch {
+        suggestStatus.textContent = 'No se pudieron generar ideas. Intenta de nuevo.';
+      } finally {
+        suggestButton.disabled = false;
+        suggestButton.textContent = 'Dame ideas';
+      }
+    });
+
+    root.addEventListener('click', async (event) => {
+      const target = event.target as HTMLElement;
+      const item = target.closest<HTMLElement>('[data-idea]');
+      if (!item) return;
+
+      if (target.closest('[data-use-idea]')) {
+        const title = item.querySelector('[data-idea-title]')!.textContent ?? '';
+        const angle = item.querySelector('[data-idea-angle]')!.textContent ?? '';
+        ideaText.value = angle ? `${title}. ${angle}` : title;
+        ideaId.value = item.dataset.id ?? '';
+        ideaText.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        ideaText.focus();
+      }
+
+      if (target.closest('[data-discard-idea]')) {
+        const response = await fetch('/api/ideas/update', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ id: item.dataset.id, status: 'discarded' }),
+        });
+        if (!response.ok) return;
+        item.dataset.status = 'discarded';
+        item.querySelector('[data-idea-status]')!.textContent = STATUS_LABELS.discarded;
+        if (ideaId.value === item.dataset.id) ideaId.value = '';
+        lists.history.prepend(item);
+        refresh();
+      }
+    });
+
+    // Escribir el guion tarda: se avisa y se evita el doble envío.
+    q<HTMLFormElement>('[data-studio-form]').addEventListener('submit', () => {
+      const submit = root.querySelector<HTMLButtonElement>('[data-submit]');
+      if (submit) {
+        submit.disabled = true;
+        submit.textContent = 'Escribiendo guion… puede tardar hasta un minuto';
+      }
+    });
+  }
+</script>

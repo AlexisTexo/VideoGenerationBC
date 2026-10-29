@@ -17,7 +17,7 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
     return new Response('No encontrado', { status: 404 });
   }
 
-  const back = (query: string) => redirect(`/projects/${id}?section=${section}&${query}`, 303);
+  const back = (query: string) => redirect(`/projects/${id}/settings?section=${section}&${query}`, 303);
 
   const data = parseSection(section, form);
   if (!data) {

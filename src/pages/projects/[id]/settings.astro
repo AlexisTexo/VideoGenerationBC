@@ -1,10 +1,10 @@
 ---
-import Base from '../../layouts/Base.astro';
-import AppHeader from '../../components/AppHeader.astro';
-import ProjectLogo from '../../components/ProjectLogo.astro';
-import ProjectSection from '../../components/ProjectSection.astro';
-import { projectToContext } from '../../lib/project-context';
-import { PROJECT_COLUMNS, SECTIONS, isUuid, type Project } from '../../lib/projects';
+import Base from '../../../layouts/Base.astro';
+import AppHeader from '../../../components/AppHeader.astro';
+import ProjectLogo from '../../../components/ProjectLogo.astro';
+import ProjectSection from '../../../components/ProjectSection.astro';
+import { projectToContext } from '../../../lib/project-context';
+import { PROJECT_COLUMNS, SECTIONS, isUuid, type Project } from '../../../lib/projects';
 
 const { supabase, role } = Astro.locals;
 const canEdit = role === 'admin' || role === 'editor';
@@ -60,7 +60,7 @@ const context = projectToContext(project);
             nav.map((item) => (
               <li class="shrink-0">
                 <a
-                  href={`/projects/${project.id}?section=${item.id}`}
+                  href={`/projects/${project.id}/settings?section=${item.id}`}
                   data-section={item.id}
                   aria-current={item.id === activeId ? 'page' : undefined}
                   class="flex h-11 items-center whitespace-nowrap rounded-lg border border-transparent px-3 text-muted transition-colors hover:text-text aria-[current=page]:border-border aria-[current=page]:bg-surface aria-[current=page]:font-semibold aria-[current=page]:text-text"

@@ -1,0 +1,99 @@
+---
+import Base from '../../../../layouts/Base.astro';
+import AppHeader from '../../../../components/AppHeader.astro';
+import ProjectLogo from '../../../../components/ProjectLogo.astro';
+import { isUuid } from '../../../../lib/projects';
+import { VISUAL_LABELS, type Scene } from '../../../../lib/video-ai';
+
+const { supabase } = Astro.locals;
+const { id, videoId } = Astro.params;
+if (!id || !videoId || !isUuid(id) || !isUuid(videoId)) {
+  return new Response('No encontrado', { status: 404 });
+}
+
+const { data: video, error } = await supabase
+  .from('videos')
+  .select('id, title, idea, voice_id, voice_name, target_seconds, script, project:projects(id, name, logo_url)')
+  .eq('id', videoId)
+  .eq('project_id', id)
+  .maybeSingle();
+
+if (error) {
+  console.error('cargar video falló:', error.code, error.message);
+  return new Response('No se pudo cargar el video.', { status: 500 });
+}
+if (!video) {
+  return new Response('No encontrado', { status: 404 });
+}
+
+const project = video.project as unknown as { id: string; name: string; logo_url: string };
+const scenes = video.script as Scene[];
+const total = scenes.at(-1)?.end ?? 0;
+
+const clock = (seconds: number) => {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${String(s).padStart(2, '0')}`;
+};
+---
+
+<Base title={`${video.title || 'Guion'} · ${project.name}`}>
+  <AppHeader />
+
+  <main class="mx-auto max-w-3xl px-4 py-10">
+    <a href={`/projects/${project.id}`} class="text-muted transition-colors hover:text-text">← Nuevo video</a>
+
+    <div class="mt-4 flex items-center gap-4">
+      <ProjectLogo name={project.name} logoUrl={project.logo_url} class="size-14" />
+      <div class="min-w-0">
+        <h1 class="text-3xl font-semibold tracking-tight">{video.title || 'Guion sin título'}</h1>
+        <p class="text-muted">{project.name}</p>
+      </div>
+    </div>
+
+    <dl class="mt-8 grid gap-x-8 gap-y-4 sm:grid-cols-[auto_1fr]">
+      <dt class="font-medium">Idea</dt>
+      <dd class="text-muted">{video.idea}</dd>
+      <dt class="font-medium">Voz</dt>
+      <dd class="text-muted">
+        {video.voice_id ? `${video.voice_name || 'Sin nombre'} (${video.voice_id})` : 'Sin elegir'}
+      </dd>
+      <dt class="font-medium">Duración</dt>
+      <dd class="text-muted">
+        {clock(total)} de {video.target_seconds} s objetivo · {scenes.length} escenas
+      </dd>
+    </dl>
+
+    <h2 class="mt-12 text-xl font-semibold tracking-tight">Guion</h2>
+    <p class="mt-2 text-muted">
+      Los tiempos son estimados: se ajustan con la duración real de la voz cuando se genera el audio.
+    </p>
+
+    <ol class="mt-4 divide-y divide-border rounded-2xl border border-border bg-surface">
+      {
+        scenes.map((scene, index) => (
+          <li class="grid gap-3 px-5 py-4 sm:grid-cols-[6.5rem_1fr]">
+            <p class="font-medium tabular-nums text-muted">
+              {clock(scene.start)}–{clock(scene.end)}
+              <span class="sr-only"> escena {index + 1}</span>
+            </p>
+            <div class="min-w-0">
+              <p>{scene.narration}</p>
+              <p class="mt-2 text-sm text-muted">
+                {VISUAL_LABELS[scene.visual.type]}
+                {scene.visual.prompt && ` · ${scene.visual.prompt}`}
+              </p>
+            </div>
+          </li>
+        ))
+      }
+    </ol>
+
+    <a
+      href={`/projects/${project.id}`}
+      class="mt-10 inline-flex h-12 items-center rounded-lg border border-border bg-surface px-6 font-semibold transition-[background-color,transform] hover:bg-bg active:scale-[0.98]"
+    >
+      Crear otro video
+    </a>
+  </main>
+</Base>
