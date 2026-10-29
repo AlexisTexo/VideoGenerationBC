@@ -2,10 +2,15 @@
 import Base from '../../../../layouts/Base.astro';
 import AppHeader from '../../../../components/AppHeader.astro';
 import ProjectLogo from '../../../../components/ProjectLogo.astro';
+import Stepper from '../../../../components/Stepper.astro';
 import { isUuid } from '../../../../lib/projects';
-import { VISUAL_LABELS, type Scene } from '../../../../lib/video-ai';
+import { VISUAL_LABELS, type Scene, type VisualSlot } from '../../../../lib/video-ai';
+import { LIMITS, recommendedVisuals } from '../../../../lib/video-plan';
+import { canCreate } from '../../../../lib/video-data';
 
-const { supabase } = Astro.locals;
+const { supabase, role } = Astro.locals;
+const canEdit = canCreate(role);
+
 const { id, videoId } = Astro.params;
 if (!id || !videoId || !isUuid(id) || !isUuid(videoId)) {
   return new Response('No encontrado', { status: 404 });
@@ -13,14 +18,14 @@ if (!id || !videoId || !isUuid(id) || !isUuid(videoId)) {
 
 const { data: video, error } = await supabase
   .from('videos')
-  .select('id, title, idea, voice_id, voice_name, target_seconds, script, project:projects(id, name, logo_url)')
+  .select('id, title, idea, voice_id, voice_name, target_seconds, script, visuals, project:projects(id, name, logo_url)')
   .eq('id', videoId)
   .eq('project_id', id)
   .maybeSingle();
 
 if (error) {
   console.error('cargar video falló:', error.code, error.message);
-  return new Response('No se pudo cargar el video.', { status: 500 });
+  return new Response('No se pudo cargar el video. Revisa que las migraciones estén aplicadas.', { status: 500 });
 }
 if (!video) {
   return new Response('No encontrado', { status: 404 });
@@ -28,72 +33,424 @@ if (!video) {
 
 const project = video.project as unknown as { id: string; name: string; logo_url: string };
 const scenes = video.script as Scene[];
+const visuals = video.visuals as VisualSlot[];
 const total = scenes.at(-1)?.end ?? 0;
+
+const STEPS = [
+  { id: 'guion', label: 'Guion' },
+  { id: 'visuales', label: 'Visuales' },
+  { id: 'voz', label: 'Voz' },
+] as const;
+const requested = Astro.url.searchParams.get('step');
+const activeId = STEPS.some((s) => s.id === requested) ? requested : 'guion';
+
+const saved = Astro.url.searchParams.get('ok') === '1';
+const problem = Astro.url.searchParams.get('error');
+const errorMessages: Record<string, string> = {
+  counts: `Elige al menos una imagen o un video, hasta ${LIMITS.maxVisuals} en total.`,
+  ai: 'No se pudo planear los visuales. Intenta de nuevo.',
+  config: 'Falta configurar GEMINI_API_KEY en el archivo .env del servidor.',
+  save: 'No se pudieron guardar los cambios.',
+  voice: 'Ese ID de voz no tiene un formato válido.',
+};
+
+const recommended = recommendedVisuals(Math.round(total) || video.target_seconds);
+const imageCount = visuals.filter((v) => v.type === 'gemini_image').length;
+const clipCount = visuals.filter((v) => v.type === 'pexels_clip').length;
 
 const clock = (seconds: number) => {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${String(s).padStart(2, '0')}`;
 };
+
+const buttonBase =
+  'inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-base font-semibold transition-[background-color,transform] duration-150 ease-out active:scale-[0.97] disabled:opacity-50 disabled:active:scale-100';
+const secondary = `${buttonBase} border border-border bg-surface hover:bg-bg`;
+const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
+const field =
+  'h-12 w-full rounded-xl border border-border bg-surface px-4 text-base focus-visible:border-focus disabled:opacity-60';
 ---
 
 <Base title={`${video.title || 'Guion'} · ${project.name}`}>
   <AppHeader />
 
-  <main class="mx-auto max-w-3xl px-4 py-10">
+  <main class="mx-auto max-w-3xl px-4 py-8" data-video>
     <a href={`/projects/${project.id}`} class="text-muted transition-colors hover:text-text">← Nuevo video</a>
 
     <div class="mt-4 flex items-center gap-4">
-      <ProjectLogo name={project.name} logoUrl={project.logo_url} class="size-14" />
+      <ProjectLogo name={project.name} logoUrl={project.logo_url} class="size-12" />
       <div class="min-w-0">
-        <h1 class="text-3xl font-semibold tracking-tight">{video.title || 'Guion sin título'}</h1>
+        <h1 class="text-2xl font-semibold tracking-tight">{video.title || 'Guion sin título'}</h1>
         <p class="text-muted">{project.name}</p>
       </div>
     </div>
 
-    <dl class="mt-8 grid gap-x-8 gap-y-4 sm:grid-cols-[auto_1fr]">
-      <dt class="font-medium">Idea</dt>
-      <dd class="text-muted">{video.idea}</dd>
-      <dt class="font-medium">Voz</dt>
-      <dd class="text-muted">
-        {video.voice_id ? `${video.voice_name || 'Sin nombre'} (${video.voice_id})` : 'Sin elegir'}
-      </dd>
-      <dt class="font-medium">Duración</dt>
-      <dd class="text-muted">
-        {clock(total)} de {video.target_seconds} s objetivo · {scenes.length} escenas
-      </dd>
-    </dl>
-
-    <h2 class="mt-12 text-xl font-semibold tracking-tight">Guion</h2>
-    <p class="mt-2 text-muted">
-      Los tiempos son estimados: se ajustan con la duración real de la voz cuando se genera el audio.
-    </p>
-
-    <ol class="mt-4 divide-y divide-border rounded-2xl border border-border bg-surface">
+    <div role="tablist" aria-label="Pasos del video" class="mt-8 flex gap-1 border-b border-border" data-tablist>
       {
-        scenes.map((scene, index) => (
-          <li class="grid gap-3 px-5 py-4 sm:grid-cols-[6.5rem_1fr]">
-            <p class="font-medium tabular-nums text-muted">
-              {clock(scene.start)}–{clock(scene.end)}
-              <span class="sr-only"> escena {index + 1}</span>
-            </p>
-            <div class="min-w-0">
-              <p>{scene.narration}</p>
-              <p class="mt-2 text-sm text-muted">
-                {VISUAL_LABELS[scene.visual.type]}
-                {scene.visual.prompt && ` · ${scene.visual.prompt}`}
-              </p>
-            </div>
-          </li>
+        STEPS.map((step) => (
+          <button
+            type="button"
+            role="tab"
+            id={`tab-${step.id}`}
+            aria-controls={`panel-${step.id}`}
+            aria-selected={step.id === activeId ? 'true' : 'false'}
+            tabindex={step.id === activeId ? 0 : -1}
+            data-tab={step.id}
+            class="-mb-px inline-flex h-12 items-center gap-2 border-b-2 border-transparent px-4 font-medium text-muted transition-colors hover:text-text aria-selected:border-accent aria-selected:text-text"
+          >
+            {step.label}
+            {((step.id === 'visuales' && visuals.length > 0) || (step.id === 'voz' && video.voice_id)) && (
+              <svg viewBox="0 0 24 24" class="size-4 text-ok" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" role="img" aria-label="Listo">
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            )}
+          </button>
         ))
       }
-    </ol>
+    </div>
 
-    <a
-      href={`/projects/${project.id}`}
-      class="mt-10 inline-flex h-12 items-center rounded-lg border border-border bg-surface px-6 font-semibold transition-[background-color,transform] hover:bg-bg active:scale-[0.98]"
-    >
-      Crear otro video
-    </a>
+    <div class="mt-8">
+      {saved && <p role="status" data-flash class="mb-6 text-ok">Cambios guardados.</p>}
+      {
+        problem && (
+          <p role="alert" data-flash class="mb-6 text-danger">
+            {errorMessages[problem] ?? 'Algo salió mal.'}
+          </p>
+        )
+      }
+
+      <section role="tabpanel" id="panel-guion" aria-labelledby="tab-guion" data-panel="guion" hidden={activeId !== 'guion'}>
+        <h2 class="text-2xl font-semibold tracking-tight">Guion</h2>
+        <dl class="mt-4 grid gap-x-8 gap-y-3 sm:grid-cols-[auto_1fr]">
+          <dt class="font-medium">Idea</dt>
+          <dd class="text-muted">{video.idea}</dd>
+          <dt class="font-medium">Duración</dt>
+          <dd class="text-muted">
+            {clock(total)} de {video.target_seconds} s objetivo · {scenes.length} escenas
+          </dd>
+        </dl>
+        <p class="mt-6 text-muted">
+          Los tiempos son estimados: se ajustan con la duración real de la voz cuando se genera el audio.
+        </p>
+
+        <ol class="mt-4 divide-y divide-border rounded-2xl border border-border bg-surface">
+          {
+            scenes.map((scene, index) => (
+              <li class="grid gap-3 px-5 py-4 sm:grid-cols-[6.5rem_1fr]">
+                <p class="font-medium tabular-nums text-muted">
+                  {clock(scene.start)}–{clock(scene.end)}
+                  <span class="sr-only"> escena {index + 1}</span>
+                </p>
+                <p>{scene.narration}</p>
+              </li>
+            ))
+          }
+        </ol>
+
+        <div class="mt-10 flex justify-end">
+          <button type="button" class={secondary} data-goto="visuales">Siguiente: visuales →</button>
+        </div>
+      </section>
+
+      <section role="tabpanel" id="panel-visuales" aria-labelledby="tab-visuales" data-panel="visuales" hidden={activeId !== 'visuales'}>
+        <h2 class="text-2xl font-semibold tracking-tight">Imágenes y videos</h2>
+        <p class="mt-2 max-w-prose text-muted">
+          Elige cuántas imágenes generadas con Gemini y cuántos videos de stock de Pexels aparecen. Pon 0 en lo que no
+          quieras. Se reparten a lo largo del guion.
+        </p>
+
+        <form method="post" action="/api/videos/visuals" class="mt-6" data-visuals-form>
+          <input type="hidden" name="video_id" value={video.id} />
+          <fieldset disabled={!canEdit}>
+            <div class="grid gap-6 sm:grid-cols-2">
+              <Stepper
+                name="images"
+                label="Imágenes con IA"
+                hint="Las genera Gemini con la paleta del proyecto."
+                value={imageCount || recommended.images}
+                min={0}
+                max={LIMITS.maxVisuals}
+              />
+              <Stepper
+                name="clips"
+                label="Videos de Pexels"
+                hint="Clips de stock que se buscan por escena."
+                value={visuals.length ? clipCount : recommended.clips}
+                min={0}
+                max={LIMITS.maxVisuals}
+              />
+            </div>
+            <div class="mt-6 rounded-xl border border-border bg-surface p-4">
+              <p class="font-medium" data-visuals-total aria-live="polite"></p>
+              <button
+                type="button"
+                data-use-recommended
+                data-images={recommended.images}
+                data-clips={recommended.clips}
+                class="mt-1 font-medium text-link underline underline-offset-4"
+              >
+                Usar lo recomendado ({recommended.images} imágenes y {recommended.clips} videos)
+              </button>
+            </div>
+          </fieldset>
+          {
+            canEdit && (
+              <div class="mt-6 flex flex-wrap items-center gap-3">
+                <button type="submit" class={primary} data-visuals-submit>
+                  {visuals.length ? 'Volver a planear visuales' : 'Planear visuales'}
+                </button>
+                <p class="text-sm text-muted">La IA decide qué mostrar en cada momento. Puede tardar un poco.</p>
+              </div>
+            )
+          }
+        </form>
+
+        {
+          visuals.length > 0 && (
+            <>
+              <h3 class="mt-12 font-semibold">Plan de visuales</h3>
+              <ol class="mt-3 divide-y divide-border rounded-2xl border border-border bg-surface">
+                {visuals.map((v) => (
+                  <li class="grid gap-3 px-5 py-4 sm:grid-cols-[6.5rem_1fr]">
+                    <p class="font-medium tabular-nums text-muted">
+                      {clock(v.start)}–{clock(v.end)}
+                    </p>
+                    <div class="min-w-0">
+                      <p class="font-medium">{VISUAL_LABELS[v.type]}</p>
+                      <p class="mt-1 text-muted">{v.prompt}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </>
+          )
+        }
+
+        <div class="mt-10 flex justify-between">
+          <button type="button" class={secondary} data-goto="guion">← Guion</button>
+          <button type="button" class={secondary} data-goto="voz">Siguiente: voz →</button>
+        </div>
+      </section>
+
+      <section role="tabpanel" id="panel-voz" aria-labelledby="tab-voz" data-panel="voz" hidden={activeId !== 'voz'}>
+        <h2 class="text-2xl font-semibold tracking-tight">Elige la voz</h2>
+        <p class="mt-2 max-w-prose text-muted">
+          Pega el ID de la voz de ElevenLabs y escúchala antes de guardarla.
+        </p>
+
+        <form method="post" action="/api/videos/voice" class="mt-6">
+          <input type="hidden" name="video_id" value={video.id} />
+          <input type="hidden" name="voice_name" value={video.voice_name} data-voice-name />
+          <fieldset disabled={!canEdit}>
+            <div class="flex gap-3">
+              <label class="sr-only" for="voice_id">ID de voz (ElevenLabs)</label>
+              <input
+                id="voice_id"
+                name="voice_id"
+                maxlength="40"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="ID de voz"
+                value={video.voice_id}
+                class={field}
+                data-voice-id
+              />
+              <button type="button" class={secondary} data-voice-preview>Escuchar</button>
+            </div>
+            <p class="mt-3 text-muted" data-voice-status aria-live="polite">
+              {video.voice_name ? `Voz guardada: ${video.voice_name}` : ''}
+            </p>
+
+            <div class="mt-4 flex items-center gap-4 rounded-2xl border border-border bg-surface p-4" hidden data-voice-card>
+              <button
+                type="button"
+                data-voice-play
+                aria-label="Reproducir o pausar la muestra"
+                class="group grid size-12 shrink-0 place-items-center rounded-full bg-accent text-accent-fg transition-[background-color,transform] duration-150 ease-out hover:bg-accent-hover active:scale-[0.97]"
+              >
+                <svg viewBox="0 0 24 24" class="size-5 group-data-[playing=true]:hidden" fill="currentColor" aria-hidden="true">
+                  <path d="M8 5.5v13a1 1 0 0 0 1.5.86l10-6.5a1 1 0 0 0 0-1.72l-10-6.5A1 1 0 0 0 8 5.5Z" />
+                </svg>
+                <svg viewBox="0 0 24 24" class="hidden size-5 group-data-[playing=true]:block" fill="currentColor" aria-hidden="true">
+                  <rect x="6" y="5" width="4" height="14" rx="1" />
+                  <rect x="14" y="5" width="4" height="14" rx="1" />
+                </svg>
+              </button>
+              <div class="min-w-0 flex-1">
+                <p class="truncate font-semibold" data-voice-title></p>
+                <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-border" aria-hidden="true">
+                  <div class="h-full origin-left bg-accent" style="transform: scaleX(0)" data-voice-progress></div>
+                </div>
+              </div>
+            </div>
+            <audio hidden data-voice-audio></audio>
+          </fieldset>
+
+          {
+            canEdit && (
+              <div class="mt-6 flex flex-wrap items-center gap-3">
+                <button type="submit" class={primary}>Guardar voz</button>
+                <p class="text-sm text-muted">Dejar el ID vacío quita la voz del video.</p>
+              </div>
+            )
+          }
+        </form>
+
+        <div class="mt-10 flex">
+          <button type="button" class={secondary} data-goto="visuales">← Visuales</button>
+        </div>
+      </section>
+    </div>
   </main>
 </Base>
+
+<script>
+  import { LIMITS } from '../../../../lib/video-plan';
+
+  const root = document.querySelector<HTMLElement>('[data-video]');
+
+  if (root) {
+    const q = <T extends HTMLElement>(selector: string) => root.querySelector<T>(selector)!;
+    const all = <T extends HTMLElement>(selector: string) => [...root.querySelectorAll<T>(selector)];
+
+    // ---- Pasos ----
+    const tabs = all<HTMLButtonElement>('[role="tab"]');
+    const panels = all('[data-panel]');
+
+    const select = (id: string, animate: boolean, push: boolean) => {
+      for (const tab of tabs) {
+        const active = tab.dataset.tab === id;
+        tab.setAttribute('aria-selected', String(active));
+        tab.tabIndex = active ? 0 : -1;
+      }
+      for (const panel of panels) {
+        const active = panel.dataset.panel === id;
+        panel.hidden = !active;
+        panel.classList.remove('panel-in');
+        if (active && animate) {
+          void panel.offsetWidth;
+          panel.classList.add('panel-in');
+        }
+      }
+      document.querySelectorAll('[data-flash]').forEach((el) => el.remove());
+      if (push) history.pushState({ step: id }, '', `?step=${id}`);
+    };
+
+    for (const tab of tabs) tab.addEventListener('click', () => select(tab.dataset.tab!, true, true));
+    for (const go of all('[data-goto]')) go.addEventListener('click', () => select(go.dataset.goto!, true, true));
+    window.addEventListener('popstate', () =>
+      select(new URLSearchParams(location.search).get('step') ?? 'guion', true, false),
+    );
+
+    q('[data-tablist]').addEventListener('keydown', (event) => {
+      const key = (event as KeyboardEvent).key;
+      if (key !== 'ArrowRight' && key !== 'ArrowLeft') return;
+      const current = tabs.findIndex((t) => t.getAttribute('aria-selected') === 'true');
+      const next = tabs[(current + (key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+      select(next.dataset.tab!, false, true);
+      next.focus();
+      event.preventDefault();
+    });
+
+    // ---- Visuales ----
+    const images = q<HTMLInputElement>('#images');
+    const clips = q<HTMLInputElement>('#clips');
+    const totalLabel = q('[data-visuals-total]');
+    const visualsSubmit = root.querySelector<HTMLButtonElement>('[data-visuals-submit]');
+
+    const refreshVisuals = () => {
+      const a = Number(images.value) || 0;
+      const b = Number(clips.value) || 0;
+      const total = a + b;
+      const valid = total >= 1 && total <= LIMITS.maxVisuals;
+      totalLabel.textContent = valid
+        ? `${total} visuales: ${a} imágenes y ${b} videos.`
+        : total < 1
+          ? 'Elige al menos una imagen o un video.'
+          : `Máximo ${LIMITS.maxVisuals} visuales en total.`;
+      totalLabel.classList.toggle('text-danger', !valid);
+      if (visualsSubmit) visualsSubmit.disabled = !valid;
+    };
+    images.addEventListener('input', refreshVisuals);
+    clips.addEventListener('input', refreshVisuals);
+    q('[data-use-recommended]').addEventListener('click', (event) => {
+      const button = event.currentTarget as HTMLElement;
+      images.value = button.dataset.images ?? '0';
+      clips.value = button.dataset.clips ?? '0';
+      refreshVisuals();
+    });
+    q<HTMLFormElement>('[data-visuals-form]').addEventListener('submit', () => {
+      if (visualsSubmit) {
+        visualsSubmit.disabled = true;
+        visualsSubmit.textContent = 'Planeando visuales…';
+      }
+    });
+    refreshVisuals();
+
+    // ---- Voz ----
+    const voiceInput = q<HTMLInputElement>('[data-voice-id]');
+    const voiceName = q<HTMLInputElement>('[data-voice-name]');
+    const voiceStatus = q('[data-voice-status]');
+    const voiceButton = q<HTMLButtonElement>('[data-voice-preview]');
+    const voiceCard = q('[data-voice-card]');
+    const voiceTitle = q('[data-voice-title]');
+    const voiceAudio = q<HTMLAudioElement>('[data-voice-audio]');
+    const voicePlay = q<HTMLButtonElement>('[data-voice-play]');
+    const voiceProgress = q('[data-voice-progress]');
+
+    voiceInput.addEventListener('input', () => (voiceName.value = ''));
+    voiceAudio.addEventListener('play', () => (voicePlay.dataset.playing = 'true'));
+    voiceAudio.addEventListener('pause', () => (voicePlay.dataset.playing = 'false'));
+    voiceAudio.addEventListener('ended', () => {
+      voicePlay.dataset.playing = 'false';
+      voiceProgress.style.transform = 'scaleX(0)';
+    });
+    voiceAudio.addEventListener('timeupdate', () => {
+      const ratio = voiceAudio.duration ? voiceAudio.currentTime / voiceAudio.duration : 0;
+      voiceProgress.style.transform = `scaleX(${ratio})`;
+    });
+    voicePlay.addEventListener('click', () => (voiceAudio.paused ? voiceAudio.play() : voiceAudio.pause()));
+
+    voiceButton.addEventListener('click', async () => {
+      const id = voiceInput.value.trim();
+      if (!id) {
+        voiceStatus.textContent = 'Escribe un ID de voz.';
+        return;
+      }
+      voiceButton.disabled = true;
+      voiceStatus.textContent = 'Buscando la voz…';
+      try {
+        const response = await fetch(`/api/elevenlabs/voice?id=${encodeURIComponent(id)}`);
+        const data = await response.json();
+        if (!response.ok) {
+          const messages: Record<string, string> = {
+            invalid: 'Ese ID no tiene un formato válido.',
+            not_found: 'No encontramos esa voz en tu cuenta de ElevenLabs.',
+            config: 'Falta ELEVENLABS_API_KEY en el .env del servidor. Puedes guardar el ID igual.',
+            auth: 'ElevenLabs rechazó la clave. Revisa ELEVENLABS_API_KEY.',
+          };
+          voiceStatus.textContent = messages[data.error] ?? 'No se pudo consultar ElevenLabs.';
+          voiceCard.hidden = true;
+          return;
+        }
+        voiceName.value = data.name ?? '';
+        voiceTitle.textContent = data.name || 'Voz sin nombre';
+        voiceCard.hidden = false;
+        if (data.previewUrl) {
+          voiceStatus.textContent = '';
+          voiceAudio.src = data.previewUrl;
+          voicePlay.hidden = false;
+          voiceAudio.play().catch(() => {});
+        } else {
+          voiceStatus.textContent = 'Esta voz no tiene muestra de audio disponible.';
+          voicePlay.hidden = true;
+        }
+      } catch {
+        voiceStatus.textContent = 'No se pudo consultar ElevenLabs.';
+      } finally {
+        voiceButton.disabled = false;
+      }
+    });
+  }
+</script>

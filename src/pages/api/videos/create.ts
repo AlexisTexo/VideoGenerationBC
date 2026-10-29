@@ -1,8 +1,8 @@
 import type { APIRoute } from 'astro';
-import { VOICE_ID_RE } from '../../../lib/elevenlabs';
 import { AiError } from '../../../lib/gemini';
 import { PROJECT_COLUMNS, isUuid, type Project } from '../../../lib/projects';
-import { DURATIONS, writeScript } from '../../../lib/video-ai';
+import { writeScript } from '../../../lib/video-ai';
+import { parseSeconds } from '../../../lib/video-plan';
 import { canCreate, loadIdeas } from '../../../lib/video-data';
 
 export const prerender = false;
@@ -19,10 +19,8 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
   const idea = String(form.get('idea') ?? '').trim().slice(0, 2000);
   if (idea.length < 5) return back('idea');
 
-  const voiceId = String(form.get('voice_id') ?? '').trim();
-  const voiceName = String(form.get('voice_name') ?? '').trim().slice(0, 100);
-  const seconds = Number(form.get('seconds'));
-  const targetSeconds = (DURATIONS as readonly number[]).includes(seconds) ? seconds : 45;
+  const seconds = parseSeconds(form);
+  if (!seconds) return back('plan');
   const ideaId = String(form.get('idea_id') ?? '');
 
   const { supabase } = locals;
@@ -34,7 +32,7 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
 
   let script;
   try {
-    script = await writeScript(project, history, idea, targetSeconds);
+    script = await writeScript(project, history, idea, seconds);
   } catch (error) {
     return back(error instanceof AiError && error.code === 'config' ? 'config' : 'ai');
   }
@@ -66,9 +64,7 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
       idea_id: linkedIdeaId,
       title: script.title,
       idea: script.adjustedIdea,
-      voice_id: VOICE_ID_RE.test(voiceId) ? voiceId : '',
-      voice_name: voiceName,
-      target_seconds: targetSeconds,
+      target_seconds: seconds,
       script: script.scenes,
     })
     .select('id')

@@ -1,0 +1,74 @@
+---
+interface Props {
+  name: string;
+  label: string;
+  hint?: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  unit?: string;
+}
+
+const { name, label, hint, value, min, max, step = 1, unit } = Astro.props;
+
+const control =
+  'grid size-12 shrink-0 place-items-center rounded-xl border border-border bg-surface transition-[background-color,transform] duration-150 ease-out hover:bg-bg active:scale-[0.97] disabled:opacity-40 disabled:active:scale-100';
+---
+
+<div data-stepper data-min={min} data-max={max} data-step={step}>
+  <label for={name} class="mb-2 block font-medium">{label}</label>
+  <div class="flex items-center gap-2">
+    <button type="button" data-stepper-dec class={control} aria-label={`Menos: ${label}`}>
+      <svg viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <path d="M5 12h14"></path>
+      </svg>
+    </button>
+    <input
+      id={name}
+      name={name}
+      type="number"
+      inputmode="numeric"
+      min={min}
+      max={max}
+      step="1"
+      value={value}
+      class="h-12 w-24 rounded-xl border border-border bg-surface text-center text-xl font-semibold tabular-nums focus-visible:border-focus disabled:opacity-60 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+    />
+    <button type="button" data-stepper-inc class={control} aria-label={`Más: ${label}`}>
+      <svg viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <path d="M12 5v14M5 12h14"></path>
+      </svg>
+    </button>
+    {unit && <span class="text-muted">{unit}</span>}
+  </div>
+  {hint && <p class="mt-2 text-sm text-muted">{hint}</p>}
+</div>
+
+<script>
+  for (const stepper of document.querySelectorAll<HTMLElement>('[data-stepper]')) {
+    const input = stepper.querySelector<HTMLInputElement>('input')!;
+    const min = Number(stepper.dataset.min);
+    const max = Number(stepper.dataset.max);
+    const step = Number(stepper.dataset.step) || 1;
+
+    const clamp = (n: number) => Math.min(max, Math.max(min, n));
+    const move = (direction: 1 | -1) => {
+      const current = Number(input.value);
+      const base = Number.isFinite(current) ? current : min;
+      // Salta al siguiente múltiplo del paso, para llegar a valores redondos.
+      const next = direction === 1 ? Math.floor(base / step) * step + step : Math.ceil(base / step) * step - step;
+      input.value = String(clamp(next));
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+
+    stepper.querySelector('[data-stepper-dec]')!.addEventListener('click', () => move(-1));
+    stepper.querySelector('[data-stepper-inc]')!.addEventListener('click', () => move(1));
+    // Al salir del campo, el valor se ajusta al rango permitido.
+    input.addEventListener('change', () => {
+      const n = Number(input.value);
+      input.value = String(clamp(Number.isFinite(n) && input.value !== '' ? Math.round(n) : min));
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  }
+</script>

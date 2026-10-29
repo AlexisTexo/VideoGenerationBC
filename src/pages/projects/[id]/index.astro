@@ -3,8 +3,9 @@ import Base from '../../../layouts/Base.astro';
 import AppHeader from '../../../components/AppHeader.astro';
 import ProjectLogo from '../../../components/ProjectLogo.astro';
 import IdeaItem from '../../../components/IdeaItem.astro';
+import Stepper from '../../../components/Stepper.astro';
 import { PROJECT_COLUMNS, isUuid, type Project } from '../../../lib/projects';
-import { DURATIONS } from '../../../lib/video-ai';
+import { LIMITS, PRESET_SECONDS } from '../../../lib/video-plan';
 import { canCreate, loadIdeas } from '../../../lib/video-data';
 
 const { supabase, role } = Astro.locals;
@@ -29,15 +30,7 @@ const ideas = await loadIdeas(supabase, id);
 const suggested = ideas.filter((i) => i.status === 'suggested');
 const history = ideas.filter((i) => i.status !== 'suggested');
 
-// La voz del último video queda como punto de partida.
-const { data: lastVideo, error: videosError } = await supabase
-  .from('videos')
-  .select('voice_id, voice_name')
-  .eq('project_id', id)
-  .neq('voice_id', '')
-  .order('created_at', { ascending: false })
-  .limit(1)
-  .maybeSingle();
+const { error: videosError } = await supabase.from('videos').select('id').eq('project_id', id).limit(1);
 const needsMigration = Boolean(videosError);
 
 const error = Astro.url.searchParams.get('error');
@@ -46,22 +39,15 @@ const errorMessages: Record<string, string> = {
   ai: 'No se pudo escribir el guion. Intenta de nuevo.',
   config: 'Falta configurar GEMINI_API_KEY en el archivo .env del servidor.',
   save: 'El guion se escribió, pero no se pudo guardar el video.',
+  plan: `La duración debe estar entre ${LIMITS.minSeconds} y ${LIMITS.maxSeconds} segundos.`,
 };
 
-const DURATION_HINTS: Record<number, string> = { 30: 'Directo', 45: 'Equilibrado', 60: 'Con detalle', 90: 'A fondo' };
-
-const STEPS = [
-  { id: 'voz', label: 'Voz' },
-  { id: 'idea', label: 'Idea' },
-  { id: 'duracion', label: 'Duración' },
-] as const;
+const DEFAULT_SECONDS = 45;
 
 const buttonBase =
   'inline-flex h-12 shrink-0 items-center justify-center gap-2 rounded-xl px-5 text-base font-semibold transition-[background-color,transform] duration-150 ease-out active:scale-[0.97] disabled:opacity-50 disabled:active:scale-100';
 const secondary = `${buttonBase} border border-border bg-surface hover:bg-bg`;
 const primary = `${buttonBase} bg-accent text-accent-fg hover:bg-accent-hover`;
-const field =
-  'h-12 w-full rounded-xl border border-border bg-surface px-4 text-base focus-visible:border-focus disabled:opacity-60';
 ---
 
 <Base title={`Nuevo video · ${project.name}`}>
@@ -93,7 +79,7 @@ const field =
     {
       needsMigration && (
         <p role="alert" class="mt-6 text-danger">
-          Faltan las tablas de ideas y videos. Aplica la migración 0006 en Supabase.
+          Faltan las tablas de ideas y videos. Aplica las migraciones 0006 y 0007 en Supabase.
         </p>
       )
     }
@@ -115,216 +101,125 @@ const field =
     >
       <input type="hidden" name="project_id" value={project.id} />
       <input type="hidden" name="idea_id" value="" data-idea-id />
-      <input type="hidden" name="voice_name" value={lastVideo?.voice_name ?? ''} data-voice-name />
 
-      <div class="min-w-0">
-        <div role="tablist" aria-label="Pasos del video" class="flex gap-1 border-b border-border" data-tablist>
-          {
-            STEPS.map((step, index) => (
+      <fieldset disabled={!canEdit || needsMigration} class="min-w-0 space-y-12">
+        <section>
+          <h2 class="text-2xl font-semibold tracking-tight">Cuenta la idea</h2>
+          <p class="mt-2 max-w-prose text-muted">
+            Escribe la idea general. Si aún no tienes una, pide ideas: la IA conoce el proyecto y lo que ya se hizo.
+          </p>
+
+          <label class="sr-only" for="idea">Tu idea</label>
+          <textarea
+            id="idea"
+            name="idea"
+            rows="4"
+            minlength="5"
+            maxlength="2000"
+            placeholder="Por ejemplo: mostrar cómo un supervisor detecta un rondín omitido en segundos"
+            class="mt-6 min-h-36 w-full resize-y rounded-xl border border-border bg-surface p-4 text-lg leading-relaxed focus-visible:border-focus disabled:opacity-60"
+            data-idea-text></textarea>
+          <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-3">
+              <button type="button" class={secondary} data-suggest>
+                <svg viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
+                  <path d="M19 16l.7 1.8L21.5 18.5l-1.8.7L19 21l-.7-1.8-1.8-.7 1.8-.7z" />
+                </svg>
+                <span data-suggest-label>Dame ideas</span>
+              </button>
+              <p class="text-muted" data-suggest-status aria-live="polite"></p>
+            </div>
+            <p class="text-sm tabular-nums text-muted" data-idea-count>0 / 2000</p>
+          </div>
+
+          <div class="mt-8">
+            <div class="inline-flex rounded-xl border border-border bg-surface p-1" role="group" aria-label="Lista de ideas">
               <button
                 type="button"
-                role="tab"
-                id={`tab-${step.id}`}
-                aria-controls={`panel-${step.id}`}
-                aria-selected={index === 0 ? 'true' : 'false'}
-                tabindex={index === 0 ? 0 : -1}
-                data-tab={step.id}
-                class="-mb-px inline-flex h-12 items-center gap-2 border-b-2 border-transparent px-4 font-medium text-muted transition-colors hover:text-text aria-selected:border-accent aria-selected:text-text"
+                data-list-tab="suggested"
+                aria-pressed="true"
+                class="h-10 rounded-lg px-4 font-medium text-muted transition-colors aria-pressed:bg-bg aria-pressed:text-text"
               >
-                {step.label}
-                <svg
-                  viewBox="0 0 24 24"
-                  class="hidden size-4 text-ok"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  data-tab-done
-                  aria-label="Listo"
-                  role="img"
-                >
-                  <path d="M20 6 9 17l-5-5" />
-                </svg>
+                Sugeridas <span class="tabular-nums" data-count="suggested">{suggested.length}</span>
               </button>
-            ))
-          }
-        </div>
-
-        <fieldset disabled={!canEdit || needsMigration} class="mt-8">
-          <section role="tabpanel" id="panel-voz" aria-labelledby="tab-voz" data-panel="voz">
-            <h2 class="text-2xl font-semibold tracking-tight">Elige la voz</h2>
-            <p class="mt-2 max-w-prose text-muted">
-              Pega el ID de la voz de ElevenLabs y escúchala. Es opcional: puedes decidirla después.
-            </p>
-            <div class="mt-6 flex gap-3">
-              <label class="sr-only" for="voice_id">ID de voz (ElevenLabs)</label>
-              <input
-                id="voice_id"
-                name="voice_id"
-                maxlength="40"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="ID de voz"
-                value={lastVideo?.voice_id ?? ''}
-                class={field}
-                data-voice-id
-              />
-              <button type="button" class={secondary} data-voice-preview>Escuchar</button>
-            </div>
-            <p class="mt-3 text-muted" data-voice-status aria-live="polite">
-              {lastVideo?.voice_name ? `Última voz usada: ${lastVideo.voice_name}` : ''}
-            </p>
-
-            <div
-              class="mt-4 flex items-center gap-4 rounded-2xl border border-border bg-surface p-4"
-              hidden
-              data-voice-card
-            >
               <button
                 type="button"
-                data-voice-play
-                aria-label="Reproducir o pausar la muestra"
-                class="group grid size-12 shrink-0 place-items-center rounded-full bg-accent text-accent-fg transition-[background-color,transform] duration-150 ease-out hover:bg-accent-hover active:scale-[0.97]"
+                data-list-tab="history"
+                aria-pressed="false"
+                class="h-10 rounded-lg px-4 font-medium text-muted transition-colors aria-pressed:bg-bg aria-pressed:text-text"
               >
-                <svg viewBox="0 0 24 24" class="size-5 group-data-[playing=true]:hidden" fill="currentColor" aria-hidden="true">
-                  <path d="M8 5.5v13a1 1 0 0 0 1.5.86l10-6.5a1 1 0 0 0 0-1.72l-10-6.5A1 1 0 0 0 8 5.5Z" />
-                </svg>
-                <svg viewBox="0 0 24 24" class="hidden size-5 group-data-[playing=true]:block" fill="currentColor" aria-hidden="true">
-                  <rect x="6" y="5" width="4" height="14" rx="1" />
-                  <rect x="14" y="5" width="4" height="14" rx="1" />
-                </svg>
+                Historial <span class="tabular-nums" data-count="history">{history.length}</span>
               </button>
-              <div class="min-w-0 flex-1">
-                <p class="truncate font-semibold" data-voice-title></p>
-                <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-border" aria-hidden="true">
-                  <div class="h-full origin-left bg-accent" style="transform: scaleX(0)" data-voice-progress></div>
-                </div>
-              </div>
-            </div>
-            <audio hidden data-voice-audio></audio>
-          </section>
-
-          <section role="tabpanel" id="panel-idea" aria-labelledby="tab-idea" data-panel="idea" hidden>
-            <h2 class="text-2xl font-semibold tracking-tight">Cuenta la idea</h2>
-            <p class="mt-2 max-w-prose text-muted">
-              Escribe la idea general. Si aún no tienes una, pide ideas: la IA conoce el proyecto y lo que ya se hizo.
-            </p>
-
-            <label class="sr-only" for="idea">Tu idea</label>
-            <textarea
-              id="idea"
-              name="idea"
-              rows="4"
-              minlength="5"
-              maxlength="2000"
-              placeholder="Por ejemplo: mostrar cómo un supervisor detecta un rondín omitido en segundos"
-              class="mt-6 min-h-36 w-full resize-y rounded-xl border border-border bg-surface p-4 text-lg leading-relaxed focus-visible:border-focus disabled:opacity-60"
-              data-idea-text></textarea>
-            <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
-              <div class="flex flex-wrap items-center gap-3">
-                <button type="button" class={secondary} data-suggest>
-                  <svg viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />
-                    <path d="M19 16l.7 1.8L21.5 18.5l-1.8.7L19 21l-.7-1.8-1.8-.7 1.8-.7z" />
-                  </svg>
-                  <span data-suggest-label>Dame ideas</span>
-                </button>
-                <p class="text-muted" data-suggest-status aria-live="polite"></p>
-              </div>
-              <p class="text-sm tabular-nums text-muted" data-idea-count>0 / 2000</p>
             </div>
 
-            <div class="mt-10">
-              <div class="inline-flex rounded-xl border border-border bg-surface p-1" role="group" aria-label="Lista de ideas">
-                <button
-                  type="button"
-                  data-list-tab="suggested"
-                  aria-pressed="true"
-                  class="h-10 rounded-lg px-4 font-medium text-muted transition-colors aria-pressed:bg-bg aria-pressed:text-text"
-                >
-                  Sugeridas <span class="tabular-nums" data-count="suggested">{suggested.length}</span>
-                </button>
-                <button
-                  type="button"
-                  data-list-tab="history"
-                  aria-pressed="false"
-                  class="h-10 rounded-lg px-4 font-medium text-muted transition-colors aria-pressed:bg-bg aria-pressed:text-text"
-                >
-                  Historial <span class="tabular-nums" data-count="history">{history.length}</span>
-                </button>
-              </div>
-
-              <div class="mt-4" data-list-panel="suggested">
-                <ul class="space-y-3" data-ideas="suggested">
-                  {suggested.map((i) => <IdeaItem {...i} />)}
-                </ul>
-                <p class="text-muted" data-empty="suggested" hidden={suggested.length > 0}>
-                  No hay ideas pendientes. Pulsa “Dame ideas”.
-                </p>
-              </div>
-              <div class="mt-4" data-list-panel="history" hidden>
-                <p class="mb-3 max-w-prose text-muted">
-                  Lo que ya se usó o se descartó. La IA no lo repite; si reutilizas una, la modifica para que se sienta
-                  distinta.
-                </p>
-                <ul class="space-y-3" data-ideas="history">
-                  {history.map((i) => <IdeaItem {...i} />)}
-                </ul>
-                <p class="text-muted" data-empty="history" hidden={history.length > 0}>Aún no hay historial.</p>
-              </div>
+            <div class="mt-4" data-list-panel="suggested">
+              <ul class="space-y-3" data-ideas="suggested">
+                {suggested.map((i) => <IdeaItem {...i} />)}
+              </ul>
+              <p class="text-muted" data-empty="suggested" hidden={suggested.length > 0}>
+                No hay ideas pendientes. Pulsa “Dame ideas”.
+              </p>
             </div>
-          </section>
+            <div class="mt-4" data-list-panel="history" hidden>
+              <p class="mb-3 max-w-prose text-muted">
+                Lo que ya se usó o se descartó. La IA no lo repite; si reutilizas una, la modifica para que se sienta
+                distinta.
+              </p>
+              <ul class="space-y-3" data-ideas="history">
+                {history.map((i) => <IdeaItem {...i} />)}
+              </ul>
+              <p class="text-muted" data-empty="history" hidden={history.length > 0}>Aún no hay historial.</p>
+            </div>
+          </div>
+        </section>
 
-          <section role="tabpanel" id="panel-duracion" aria-labelledby="tab-duracion" data-panel="duracion" hidden>
-            <h2 class="text-2xl font-semibold tracking-tight">Duración</h2>
-            <p class="mt-2 max-w-prose text-muted">
-              El guion se divide en escenas con el segundo exacto de cada una.
-            </p>
-            <div role="radiogroup" aria-label="Duración del video" class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <section class="border-t border-border pt-10">
+          <h2 class="text-2xl font-semibold tracking-tight">¿Cuánto dura?</h2>
+          <p class="mt-2 max-w-prose text-muted">
+            Elige un tiempo o escribe el que necesites. El guion se divide en escenas con el segundo exacto de cada una.
+          </p>
+          <div class="mt-6">
+            <Stepper
+              name="seconds"
+              label="Duración del video"
+              value={DEFAULT_SECONDS}
+              min={LIMITS.minSeconds}
+              max={LIMITS.maxSeconds}
+              step={5}
+              unit="segundos"
+            />
+            <div class="mt-4 flex flex-wrap gap-2" role="group" aria-label="Duraciones comunes">
               {
-                DURATIONS.map((s) => (
-                  <label class="cursor-pointer">
-                    <input type="radio" name="seconds" value={s} checked={s === 45} class="peer sr-only" data-seconds />
-                    <span class="block rounded-xl border border-border bg-surface p-4 text-center transition-colors peer-checked:border-accent peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-focus">
-                      <span class="block text-2xl font-semibold tabular-nums">
-                        {s}
-                        <span class="text-base font-normal text-muted"> s</span>
-                      </span>
-                      <span class="mt-1 block text-sm text-muted">{DURATION_HINTS[s]}</span>
-                    </span>
-                  </label>
+                PRESET_SECONDS.map((s) => (
+                  <button
+                    type="button"
+                    data-preset={s}
+                    aria-pressed={s === DEFAULT_SECONDS ? 'true' : 'false'}
+                    class="h-10 rounded-lg border border-border bg-surface px-4 font-medium tabular-nums transition-[background-color,transform] duration-150 ease-out hover:bg-bg active:scale-[0.97] aria-pressed:border-accent"
+                  >
+                    {s} s
+                  </button>
                 ))
               }
             </div>
-          </section>
-        </fieldset>
-      </div>
+            <p class="mt-4 text-muted" data-words aria-live="polite"></p>
+          </div>
+        </section>
+      </fieldset>
 
       <aside class="lg:sticky lg:top-6 lg:self-start">
         <div class="rounded-2xl border border-border bg-surface p-5">
-          <h2 class="font-semibold">Tu video</h2>
+          <h2 class="font-semibold">Tu guion</h2>
           <ul class="mt-3 divide-y divide-border">
-            {
-              [
-                { id: 'voz', label: 'Voz', empty: 'Sin elegir' },
-                { id: 'idea', label: 'Idea', empty: 'Falta escribirla' },
-                { id: 'duracion', label: 'Duración', empty: '45 segundos' },
-              ].map((row) => (
-                <li>
-                  <button
-                    type="button"
-                    data-goto={row.id}
-                    class="flex w-full items-start justify-between gap-4 py-3 text-left transition-colors hover:text-accent"
-                  >
-                    <span class="text-muted">{row.label}</span>
-                    <span class="line-clamp-2 min-w-0 text-right font-medium" data-sum={row.id}>
-                      {row.empty}
-                    </span>
-                  </button>
-                </li>
-              ))
-            }
+            <li class="flex items-start justify-between gap-4 py-3">
+              <span class="text-muted">Idea</span>
+              <span class="line-clamp-2 min-w-0 text-right font-medium" data-sum="idea">Falta escribirla</span>
+            </li>
+            <li class="flex items-start justify-between gap-4 py-3">
+              <span class="text-muted">Duración</span>
+              <span class="text-right font-medium" data-sum="duracion">{DEFAULT_SECONDS} segundos</span>
+            </li>
           </ul>
           {
             canEdit && (
@@ -336,7 +231,8 @@ const field =
             )
           }
           <p class="mt-3 text-sm text-muted">
-            La IA usa el contexto del proyecto y evita repetir ideas anteriores. Puede tardar hasta un minuto.
+            Después del guion eliges cuántas imágenes y videos de Pexels quieres, y al final la voz. Escribirlo puede
+            tardar hasta un minuto.
           </p>
         </div>
       </aside>
@@ -359,6 +255,8 @@ const field =
 </Base>
 
 <script>
+  import { WORDS_PER_SECOND } from '../../../lib/video-plan';
+
   const root = document.querySelector<HTMLElement>('[data-studio]');
 
   if (root) {
@@ -366,92 +264,47 @@ const field =
     const all = <T extends HTMLElement>(selector: string) => [...root.querySelectorAll<T>(selector)];
     const projectId = root.dataset.projectId!;
 
-    const voiceInput = q<HTMLInputElement>('[data-voice-id]');
-    const voiceName = q<HTMLInputElement>('[data-voice-name]');
-    const voiceStatus = q('[data-voice-status]');
-    const voiceButton = q<HTMLButtonElement>('[data-voice-preview]');
-    const voiceCard = q('[data-voice-card]');
-    const voiceTitle = q('[data-voice-title]');
-    const voiceAudio = q<HTMLAudioElement>('[data-voice-audio]');
-    const voicePlay = q<HTMLButtonElement>('[data-voice-play]');
-    const voiceProgress = q('[data-voice-progress]');
-
     const ideaText = q<HTMLTextAreaElement>('[data-idea-text]');
     const ideaCount = q('[data-idea-count]');
     const ideaId = q<HTMLInputElement>('[data-idea-id]');
+    const seconds = q<HTMLInputElement>('#seconds');
     const suggestButton = q<HTMLButtonElement>('[data-suggest]');
     const suggestLabel = q('[data-suggest-label]');
     const suggestStatus = q('[data-suggest-status]');
     const template = q<HTMLTemplateElement>('[data-idea-template]');
     const lists = { suggested: q('[data-ideas="suggested"]'), history: q('[data-ideas="history"]') };
-
-    const STATUS_LABELS: Record<string, string> = { suggested: 'Sugerida', used: 'Usada', discarded: 'Descartada' };
-
-    // ---- Pasos (tabs) ----
-    const tabs = all<HTMLButtonElement>('[role="tab"]');
-    const panels = all('[data-panel]');
-
-    const select = (id: string, animate: boolean) => {
-      for (const tab of tabs) {
-        const active = tab.dataset.tab === id;
-        tab.setAttribute('aria-selected', String(active));
-        tab.tabIndex = active ? 0 : -1;
-      }
-      for (const panel of panels) {
-        const active = panel.dataset.panel === id;
-        panel.hidden = !active;
-        panel.classList.remove('panel-in');
-        if (active && animate) {
-          void panel.offsetWidth; // reinicia la animación
-          panel.classList.add('panel-in');
-        }
-      }
-    };
-
-    for (const tab of tabs) tab.addEventListener('click', () => select(tab.dataset.tab!, true));
-
-    // Con teclado no se anima (acción frecuente).
-    q('[data-tablist]').addEventListener('keydown', (event) => {
-      const key = (event as KeyboardEvent).key;
-      if (key !== 'ArrowRight' && key !== 'ArrowLeft') return;
-      const current = tabs.findIndex((t) => t.getAttribute('aria-selected') === 'true');
-      const next = tabs[(current + (key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
-      select(next.dataset.tab!, false);
-      next.focus();
-      event.preventDefault();
-    });
-
-    for (const row of all('[data-goto]')) row.addEventListener('click', () => select(row.dataset.goto!, true));
-
-    // ---- Resumen en vivo ----
     const submits = all<HTMLButtonElement>('[data-submit]');
     const needsMigration = submits.length > 0 && submits[0].disabled;
 
+    const STATUS_LABELS: Record<string, string> = { suggested: 'Sugerida', used: 'Usada', discarded: 'Descartada' };
+
+    // ---- Resumen en vivo ----
     const refreshSummary = () => {
       const idea = ideaText.value.trim();
-      const voiceId = voiceInput.value.trim();
-      const seconds = root.querySelector<HTMLInputElement>('[data-seconds]:checked')?.value ?? '45';
       const ideaReady = idea.length >= 5;
+      const total = Number(seconds.value) || 0;
 
-      q('[data-sum="voz"]').textContent = voiceName.value || (voiceId ? `ID …${voiceId.slice(-4)}` : 'Sin elegir');
       const ideaSummary = q('[data-sum="idea"]');
       ideaSummary.textContent = ideaReady ? idea : 'Falta escribirla';
       ideaSummary.classList.toggle('text-danger', !ideaReady);
-      q('[data-sum="duracion"]').textContent = `${seconds} segundos`;
+      q('[data-sum="duracion"]').textContent = `${total} segundos`;
       ideaCount.textContent = `${ideaText.value.length} / 2000`;
+      q('[data-words]').textContent = `Unas ${Math.round(total * WORDS_PER_SECOND)} palabras de narración.`;
 
-      const done: Record<string, boolean> = { voz: Boolean(voiceId), idea: ideaReady, duracion: true };
-      for (const tab of tabs) tab.querySelector<SVGElement>('[data-tab-done]')!.classList.toggle('hidden', !done[tab.dataset.tab!]);
-
+      for (const preset of all<HTMLButtonElement>('[data-preset]')) {
+        preset.setAttribute('aria-pressed', String(Number(preset.dataset.preset) === total));
+      }
       if (!needsMigration) for (const button of submits) button.disabled = !ideaReady;
     };
 
     ideaText.addEventListener('input', refreshSummary);
-    voiceInput.addEventListener('input', () => {
-      voiceName.value = '';
-      refreshSummary();
-    });
-    for (const radio of all<HTMLInputElement>('[data-seconds]')) radio.addEventListener('change', refreshSummary);
+    seconds.addEventListener('input', refreshSummary);
+    for (const preset of all<HTMLButtonElement>('[data-preset]')) {
+      preset.addEventListener('click', () => {
+        seconds.value = preset.dataset.preset!;
+        refreshSummary();
+      });
+    }
 
     // ---- Lista de ideas: sugeridas / historial ----
     const refreshLists = () => {
@@ -468,61 +321,6 @@ const field =
       for (const panel of all('[data-list-panel]')) panel.hidden = panel.dataset.listPanel !== key;
     };
     for (const tab of listTabs) tab.addEventListener('click', () => showList(tab.dataset.listTab!));
-
-    // ---- Voz: búsqueda y reproductor ----
-    voiceAudio.addEventListener('play', () => (voicePlay.dataset.playing = 'true'));
-    voiceAudio.addEventListener('pause', () => (voicePlay.dataset.playing = 'false'));
-    voiceAudio.addEventListener('ended', () => {
-      voicePlay.dataset.playing = 'false';
-      voiceProgress.style.transform = 'scaleX(0)';
-    });
-    voiceAudio.addEventListener('timeupdate', () => {
-      const ratio = voiceAudio.duration ? voiceAudio.currentTime / voiceAudio.duration : 0;
-      voiceProgress.style.transform = `scaleX(${ratio})`;
-    });
-    voicePlay.addEventListener('click', () => (voiceAudio.paused ? voiceAudio.play() : voiceAudio.pause()));
-
-    voiceButton.addEventListener('click', async () => {
-      const id = voiceInput.value.trim();
-      if (!id) {
-        voiceStatus.textContent = 'Escribe un ID de voz.';
-        return;
-      }
-      voiceButton.disabled = true;
-      voiceStatus.textContent = 'Buscando la voz…';
-      try {
-        const response = await fetch(`/api/elevenlabs/voice?id=${encodeURIComponent(id)}`);
-        const data = await response.json();
-        if (!response.ok) {
-          const messages: Record<string, string> = {
-            invalid: 'Ese ID no tiene un formato válido.',
-            not_found: 'No encontramos esa voz en tu cuenta de ElevenLabs.',
-            config: 'Falta ELEVENLABS_API_KEY en el .env del servidor. Puedes guardar el ID igual.',
-            auth: 'ElevenLabs rechazó la clave. Revisa ELEVENLABS_API_KEY.',
-          };
-          voiceStatus.textContent = messages[data.error] ?? 'No se pudo consultar ElevenLabs.';
-          voiceCard.hidden = true;
-          return;
-        }
-        voiceName.value = data.name ?? '';
-        voiceTitle.textContent = data.name || 'Voz sin nombre';
-        voiceCard.hidden = false;
-        if (data.previewUrl) {
-          voiceStatus.textContent = '';
-          voiceAudio.src = data.previewUrl;
-          voicePlay.hidden = false;
-          voiceAudio.play().catch(() => {});
-        } else {
-          voiceStatus.textContent = 'Esta voz no tiene muestra de audio disponible.';
-          voicePlay.hidden = true;
-        }
-        refreshSummary();
-      } catch {
-        voiceStatus.textContent = 'No se pudo consultar ElevenLabs.';
-      } finally {
-        voiceButton.disabled = false;
-      }
-    });
 
     // ---- Ideas ----
     const addIdea = (idea: { id: string; title: string; angle: string; status: string }) => {
@@ -606,7 +404,6 @@ const field =
       }
     });
 
-    select('voz', false);
     refreshSummary();
   }
 </script>
