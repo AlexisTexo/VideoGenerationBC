@@ -9,7 +9,8 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "check:gemini": "node --env-file=.env scripts/check-gemini.mjs"
   },
   "dependencies": {
     "@astrojs/node": "^11.1.9",

@@ -7,7 +7,11 @@ export class AiError extends Error {
   }
 }
 
-const DEFAULT_MODEL = 'gemini-3.8-flash';
+// El más barato de la familia estable (flash-lite) y con capa gratuita; de sobra para guiones.
+const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
+
+// Tope de salida: un guion de 5 minutos cabe holgado y se corta cualquier respuesta desbocada.
+const MAX_OUTPUT_TOKENS = 8192;
 
 /** Pide a Gemini una respuesta JSON y la devuelve ya parseada. */
 export async function generateJson(options: { system: string; prompt: string; temperature?: number }): Promise<unknown> {
@@ -23,7 +27,11 @@ export async function generateJson(options: { system: string; prompt: string; te
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: options.system }] },
         contents: [{ role: 'user', parts: [{ text: options.prompt }] }],
-        generationConfig: { temperature: options.temperature ?? 0.9, responseMimeType: 'application/json' },
+        generationConfig: {
+          temperature: options.temperature ?? 0.9,
+          responseMimeType: 'application/json',
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+        },
       }),
       signal: AbortSignal.timeout(90_000),
     });
@@ -39,7 +47,12 @@ export async function generateJson(options: { system: string; prompt: string; te
 
   const data = (await response.json()) as {
     candidates?: { content?: { parts?: { text?: string }[] } }[];
+    usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
   };
+  // Para tener a la vista cuánto cuesta cada llamada.
+  console.info(
+    `[gemini] ${model}: ${data.usageMetadata?.promptTokenCount ?? '?'} tokens de entrada, ${data.usageMetadata?.candidatesTokenCount ?? '?'} de salida`,
+  );
   const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('') ?? '';
   if (!text.trim()) throw new AiError('Gemini devolvió una respuesta vacía', 'format');
 
