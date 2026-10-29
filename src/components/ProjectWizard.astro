@@ -1,0 +1,111 @@
+---
+import ProjectSection from './ProjectSection.astro';
+import { SECTIONS, type ProjectInput } from '../lib/projects';
+
+interface Props {
+  project: ProjectInput;
+}
+
+const { project } = Astro.props;
+
+const secondary =
+  'h-12 rounded-lg border border-border bg-surface px-6 text-base font-semibold transition-[background-color,transform] hover:bg-bg active:scale-[0.98]';
+const primary =
+  'h-12 rounded-lg bg-accent px-6 text-base font-semibold text-accent-fg transition-[background-color,transform] hover:bg-accent-hover active:scale-[0.98]';
+---
+
+<form method="post" action="/api/projects/create" enctype="multipart/form-data" data-wizard>
+  <div class="mb-10">
+    <p class="text-muted" aria-live="polite">
+      <span data-step-count>Paso 1 de {SECTIONS.length}</span> · <span data-step-name>{SECTIONS[0].title}</span>
+    </p>
+    <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-border" aria-hidden="true">
+      <div
+        class="h-full origin-left rounded-full bg-accent transition-transform duration-300 motion-reduce:transition-none"
+        data-bar
+        style={`transform: scaleX(${1 / SECTIONS.length})`}
+      >
+      </div>
+    </div>
+  </div>
+
+  {
+    SECTIONS.map((s) => (
+      <section data-step data-title={s.title} class="mb-12 space-y-6">
+        <div>
+          <h2 tabindex="-1" class="text-2xl font-semibold tracking-tight outline-none">
+            {s.title}
+          </h2>
+          <p class="mt-2 text-muted">{s.description}</p>
+        </div>
+        <ProjectSection section={s.id} project={project} />
+      </section>
+    ))
+  }
+
+  <div class="sticky bottom-0 -mx-4 flex gap-3 border-t border-border bg-bg/95 px-4 py-4">
+    <button type="button" data-prev hidden class={secondary}>Atrás</button>
+    <button type="button" data-next hidden class={`${primary} flex-1 sm:flex-none`}>Siguiente</button>
+    <button type="submit" data-submit class={`${primary} w-full sm:w-auto`}>Crear proyecto</button>
+  </div>
+</form>
+
+<script>
+  const form = document.querySelector<HTMLFormElement>('[data-wizard]');
+
+  if (form) {
+    const panels = [...form.querySelectorAll<HTMLElement>('[data-step]')];
+    const prev = form.querySelector<HTMLButtonElement>('[data-prev]')!;
+    const next = form.querySelector<HTMLButtonElement>('[data-next]')!;
+    const submit = form.querySelector<HTMLButtonElement>('[data-submit]')!;
+    const count = form.querySelector<HTMLElement>('[data-step-count]')!;
+    const name = form.querySelector<HTMLElement>('[data-step-name]')!;
+    const bar = form.querySelector<HTMLElement>('[data-bar]')!;
+    let current = 0;
+
+    const show = (index: number, moveFocus: boolean) => {
+      current = index;
+      const last = index === panels.length - 1;
+      panels.forEach((panel, i) => (panel.hidden = i !== index));
+      count.textContent = `Paso ${index + 1} de ${panels.length}`;
+      name.textContent = panels[index].dataset.title ?? '';
+      bar.style.transform = `scaleX(${(index + 1) / panels.length})`;
+      prev.hidden = index === 0;
+      next.hidden = last;
+      submit.hidden = !last;
+      if (moveFocus) {
+        window.scrollTo({ top: 0 });
+        panels[index].querySelector<HTMLElement>('h2')?.focus();
+      }
+    };
+
+    next.addEventListener('click', () => {
+      const fields = panels[current].querySelectorAll<HTMLInputElement>('input, select, textarea');
+      for (const field of fields) {
+        if (!field.checkValidity()) {
+          field.reportValidity();
+          return;
+        }
+      }
+      show(current + 1, true);
+    });
+
+    prev.addEventListener('click', () => show(current - 1, true));
+
+    // Enter en un campo avanza de paso en vez de enviar el formulario a medias.
+    form.addEventListener('keydown', (event) => {
+      const target = event.target;
+      if (
+        event.key === 'Enter' &&
+        target instanceof HTMLInputElement &&
+        target.type !== 'checkbox' &&
+        current < panels.length - 1
+      ) {
+        event.preventDefault();
+        next.click();
+      }
+    });
+
+    show(0, false);
+  }
+</script>

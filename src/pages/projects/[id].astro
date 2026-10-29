@@ -1,8 +1,10 @@
 ---
 import Base from '../../layouts/Base.astro';
 import AppHeader from '../../components/AppHeader.astro';
-import ProjectForm from '../../components/ProjectForm.astro';
-import { PROJECT_COLUMNS, isUuid, type Project } from '../../lib/projects';
+import ProjectLogo from '../../components/ProjectLogo.astro';
+import ProjectSection from '../../components/ProjectSection.astro';
+import { projectToContext } from '../../lib/project-context';
+import { PROJECT_COLUMNS, SECTIONS, isUuid, type Project } from '../../lib/projects';
 
 const { supabase, role } = Astro.locals;
 const canEdit = role === 'admin' || role === 'editor';
@@ -18,38 +20,136 @@ if (!project) {
   return new Response('No encontrado', { status: 404 });
 }
 
+const requested = Astro.url.searchParams.get('section');
+const showContext = requested === 'contexto';
+const current = SECTIONS.find((s) => s.id === requested) ?? SECTIONS[0];
+
+const nav = [...SECTIONS.map((s) => ({ id: s.id, label: s.label })), { id: 'contexto', label: 'Contexto' }];
+const activeId = showContext ? 'contexto' : current.id;
+
 const saved = Astro.url.searchParams.get('ok') === '1';
-const invalid = Astro.url.searchParams.get('error');
+const error = Astro.url.searchParams.get('error');
+const errorMessages: Record<string, string> = {
+  invalid: 'Revisa los datos: el nombre es obligatorio y los colores deben tener formato #RRGGBB.',
+  logo: 'El logo debe ser PNG, JPG o WebP de máximo 2 MB.',
+};
+
+const context = showContext ? projectToContext(project) : '';
 ---
 
 <Base title={`${project.name} · VideoGeneratorBC`}>
   <AppHeader />
 
-  <main class="mx-auto max-w-2xl px-4 pt-10">
+  <main class="mx-auto max-w-5xl px-4 py-10">
     <a href="/" class="text-muted transition-colors hover:text-text">← Proyectos</a>
-    <h1 class="mt-4 text-3xl font-semibold tracking-tight">{project.name}</h1>
 
-    {saved && <p role="status" class="mt-4 text-ok">Cambios guardados.</p>}
-    {
-      invalid && (
-        <p role="alert" class="mt-4 text-danger">
-          {invalid === 'invalid'
-            ? 'Revisa el nombre y que los colores tengan formato #RRGGBB.'
-            : invalid === 'logo'
-              ? 'El logo debe ser PNG, JPG o WebP de máximo 2 MB.'
-              : 'No se pudieron guardar los cambios.'}
-        </p>
-      )
-    }
+    <div class="mt-4 flex items-center gap-4">
+      <ProjectLogo name={project.name} logoUrl={project.logo_url} class="size-14" />
+      <h1 class="text-3xl font-semibold tracking-tight">{project.name}</h1>
+    </div>
+    <p class="mt-3 max-w-2xl text-muted">
+      Todo lo que guardes aquí es el contexto que la IA usa para ideas, guiones y descripciones de este producto.
+      Edita solo la categoría que necesites.
+    </p>
 
-    <div class="mt-10">
-      <ProjectForm
-        project={project}
-        projectId={project.id}
-        action="/api/projects/update"
-        submitLabel="Guardar cambios"
-        canEdit={canEdit}
-      />
+    <div class="mt-10 grid gap-8 md:grid-cols-[13rem_minmax(0,1fr)]">
+      <nav aria-label="Secciones del proyecto" class="md:sticky md:top-6 md:self-start">
+        <ul class="-mx-4 flex gap-1 overflow-x-auto px-4 md:mx-0 md:flex-col md:overflow-visible md:px-0">
+          {
+            nav.map((item) => (
+              <li class="shrink-0">
+                <a
+                  href={`/projects/${project.id}?section=${item.id}`}
+                  aria-current={item.id === activeId ? 'page' : undefined}
+                  class:list={[
+                    'flex h-11 items-center whitespace-nowrap rounded-lg px-3 transition-colors',
+                    item.id === activeId
+                      ? 'border border-border bg-surface font-semibold'
+                      : 'border border-transparent text-muted hover:text-text',
+                  ]}
+                >
+                  {item.label}
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </nav>
+
+      <div class="min-w-0">
+        {saved && <p role="status" class="mb-6 text-ok">Cambios guardados.</p>}
+        {
+          error && (
+            <p role="alert" class="mb-6 text-danger">
+              {errorMessages[error] ?? 'No se pudieron guardar los cambios.'}
+            </p>
+          )
+        }
+
+        {
+          showContext ? (
+            <section>
+              <h2 class="text-2xl font-semibold tracking-tight">Contexto</h2>
+              <p class="mt-2 text-muted">
+                Así se ve este proyecto como documento. Es lo que recibe la IA al generar ideas y guiones, y viaja como
+                brief en el paquete de cada video.
+              </p>
+              <div class="mt-6 rounded-2xl border border-border bg-surface p-5">
+                <pre
+                  id="context-text"
+                  class="whitespace-pre-wrap break-words font-sans text-base leading-relaxed">{context}</pre>
+              </div>
+              <button
+                type="button"
+                id="copy-context"
+                class="mt-6 h-12 rounded-lg border border-border bg-surface px-6 text-base font-semibold transition-[background-color,transform] hover:bg-bg active:scale-[0.98]"
+              >
+                Copiar contexto
+              </button>
+            </section>
+          ) : (
+            <form method="post" action="/api/projects/update" enctype="multipart/form-data">
+              <input type="hidden" name="id" value={project.id} />
+              <input type="hidden" name="section" value={current.id} />
+              <fieldset disabled={!canEdit}>
+                <h2 class="text-2xl font-semibold tracking-tight">{current.title}</h2>
+                <p class="mt-2 text-muted">{current.description}</p>
+                <div class="mt-8">
+                  <ProjectSection section={current.id} project={project} />
+                </div>
+              </fieldset>
+
+              <div class="mt-10">
+                {canEdit ? (
+                  <button
+                    type="submit"
+                    class="h-12 w-full rounded-lg bg-accent px-6 text-base font-semibold text-accent-fg transition-[background-color,transform] hover:bg-accent-hover active:scale-[0.98] sm:w-auto"
+                  >
+                    Guardar {current.label.toLowerCase()}
+                  </button>
+                ) : (
+                  <p class="text-muted">Tu rol solo permite ver este proyecto.</p>
+                )}
+              </div>
+            </form>
+          )
+        }
+      </div>
     </div>
   </main>
 </Base>
+
+<script>
+  const button = document.getElementById('copy-context');
+  const source = document.getElementById('context-text');
+
+  button?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(source?.textContent ?? '');
+      button.textContent = 'Copiado';
+    } catch {
+      button.textContent = 'No se pudo copiar';
+    }
+    setTimeout(() => (button.textContent = 'Copiar contexto'), 2000);
+  });
+</script>

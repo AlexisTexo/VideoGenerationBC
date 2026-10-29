@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { parseProjectForm } from '../../../lib/projects';
+import { parseAllSections } from '../../../lib/projects';
 import { readLogoInput, uploadLogo } from '../../../lib/project-logo';
 
 export const prerender = false;
@@ -10,7 +10,7 @@ export const POST: APIRoute = async ({ request, locals, redirect }) => {
   }
 
   const form = await request.formData();
-  const data = parseProjectForm(form);
+  const data = parseAllSections(form);
   if (!data) {
     return redirect('/projects/new?error=invalid', 303);
   }

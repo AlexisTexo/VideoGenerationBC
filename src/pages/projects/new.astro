@@ -1,7 +1,7 @@
 ---
 import Base from '../../layouts/Base.astro';
 import AppHeader from '../../components/AppHeader.astro';
-import ProjectForm from '../../components/ProjectForm.astro';
+import ProjectWizard from '../../components/ProjectWizard.astro';
 import { PROJECT_DEFAULTS } from '../../lib/projects';
 
 const { role } = Astro.locals;
@@ -18,7 +18,10 @@ const error = Astro.url.searchParams.get('error');
   <main class="mx-auto max-w-2xl px-4 py-10">
     <a href="/" class="text-muted transition-colors hover:text-text">← Proyectos</a>
     <h1 class="mt-4 text-3xl font-semibold tracking-tight">Nuevo proyecto</h1>
-    <p class="mt-2 text-muted">Empieza con el nombre. Todo lo demás se puede ajustar después.</p>
+    <p class="mt-2 text-muted">
+      Cuanto más contexto guardes, mejores serán las ideas y los guiones. Solo el nombre es obligatorio, y todo se
+      puede editar después.
+    </p>
 
     {
       error && (
@@ -33,12 +36,7 @@ const error = Astro.url.searchParams.get('error');
     }
 
     <div class="mt-10">
-      <ProjectForm
-        project={PROJECT_DEFAULTS}
-        action="/api/projects/create"
-        submitLabel="Crear proyecto"
-        canEdit={true}
-      />
+      <ProjectWizard project={PROJECT_DEFAULTS} />
     </div>
   </main>
 </Base>
