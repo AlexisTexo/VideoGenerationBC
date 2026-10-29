@@ -221,7 +221,7 @@ ${script}
 Planea los visuales que cubren el video de principio a fin.
 - Usa EXACTAMENTE ${total} visuales: ${counts.images} con "type" = "gemini_image" y ${counts.clips} con "type" = "pexels_clip". Mézclalos en el orden que mejor acompañe la narración.
 - "start" y "end" son segundos, continuos desde 0 hasta ${duration}. Cada visual cubre el momento de la narración que ilustra.
-- "gemini_image": "prompt" es una descripción de la imagen en inglés, coherente con la marca y sin texto ni logotipos dentro de la imagen.
+- "gemini_image": "prompt" es una descripción en inglés de una escena fotográfica completa (sujeto, lugar, luz), coherente con la marca. Nada de texto legible en la imagen: sin botones con letras, carteles, rótulos ni logotipos. Para mostrar el producto, describe una persona usando una pantalla o un tablero, sin leer su contenido.
 - "pexels_clip": "prompt" son 2 a 5 palabras de búsqueda de video de stock en inglés.
 - Respeta las reglas del producto (por ejemplo, qué no mostrar).
 

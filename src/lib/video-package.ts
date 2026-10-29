@@ -110,6 +110,7 @@ Entrega un render por formato. Las imágenes ya vienen generadas para cada forma
 ## Qué hacer
 - Duración total: ${video.audio_seconds ?? video.target_seconds} s, que es lo que dura la voz (\`voiceover.mp3\`).
 - Sincroniza cada escena y cada visual con sus tiempos.
+- Legibilidad: las imágenes ocupan todo el cuadro. Si un subtítulo cae sobre una zona clara o muy detallada, pon detrás un degradado oscuro suave o una sombra en el texto.
 - Subtítulos: usa \`formats[].subtitles.cues\` (ya agrupados para que quepan en la caja de cada formato) con su \`box\`, \`fontSize\` y zona segura. Resalta la palabra activa con \`words\`.
 - Música de fondo: ${video.music ? `\`${musicFileName(video.music.path)}\` ("${video.music.name}") al ${Math.round(MUSIC_VOLUME * 100)} % de volumen; bájala aún más mientras habla la voz y desvánécela al final.` : 'no se eligió música.'}
 - Efectos de sonido: ${video.sfx ? 'sí. Añade efectos discretos en las transiciones y los momentos clave (puedes buscarlos con la skill media-use), sin tapar la voz.' : 'no.'}

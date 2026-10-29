@@ -49,13 +49,39 @@ export const packageName = (path: string, videoId: string) => path.replace(`${vi
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
+/** Describe un color con palabras (los modelos de imagen dibujan muestras de color si reciben códigos hex). */
+export function describeColor(hex: string): string {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const d = max - min;
+  const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+  if (l < 0.12) return 'near-black';
+  if (l > 0.9) return 'off-white';
+  if (s < 0.15) return l > 0.6 ? 'light gray' : 'gray';
+
+  let h = 0;
+  if (d) {
+    if (max === r) h = ((g - b) / d) % 6;
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+  }
+  h = (h * 60 + 360) % 360;
+  const name =
+    h < 15 || h >= 345 ? 'red' : h < 45 ? 'orange' : h < 70 ? 'yellow' : h < 170 ? 'green' : h < 200 ? 'teal' : h < 250 ? 'blue' : h < 290 ? 'violet' : 'magenta';
+  return l > 0.7 ? `light ${name}` : l < 0.3 ? `deep ${name}` : name;
+}
+
 function imagePrompt(project: ProjectInput, slot: VisualSlot, format: FormatId): string {
-  const palette = project.brand_colors.map((c) => `${c.name} ${c.hex}`).join(', ');
+  const colors = [...new Set(project.brand_colors.map((c) => describeColor(c.hex)))];
   const rules = project.rules.trim().slice(0, 500);
   return [
     slot.prompt,
-    palette ? `Use this brand color palette: ${palette}.` : '',
-    `${format === '9:16' ? 'Vertical 9:16' : 'Horizontal 16:9'} composition, clean modern look. Leave the lower third calm: subtitles will be placed there. No text, no logos, no watermarks.`,
+    colors.length
+      ? `Color mood: subtle accents of ${colors.join(', ')}. Use these only as lighting and tones in the scene; never draw color swatches, palettes or color bars.`
+      : '',
+    `${format === '9:16' ? 'Vertical 9:16' : 'Horizontal 16:9'} full-bleed photographic composition: the scene fills the entire frame edge to edge, with no empty bands, borders, blank areas or flat color blocks. Place the main subject in the upper-middle of the frame. Clean modern look. No text, no logos, no watermarks.`,
     rules ? `Content rules to follow strictly: ${rules}` : '',
   ]
     .filter(Boolean)
