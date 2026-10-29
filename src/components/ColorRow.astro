@@ -1,0 +1,49 @@
+---
+interface Props {
+  name?: string;
+  hex?: string;
+}
+
+const { name = '', hex = '#7C05F2' } = Astro.props;
+---
+
+<li class="flex flex-wrap items-center gap-3 sm:flex-nowrap" data-color-row>
+  <input
+    type="text"
+    name="color_name"
+    value={name}
+    maxlength="30"
+    placeholder="Nombre (ej. Principal)"
+    aria-label="Nombre del color"
+    autocomplete="off"
+    class="h-12 min-w-0 flex-1 basis-full rounded-lg border border-border bg-bg px-4 text-base focus-visible:border-focus disabled:opacity-60 sm:basis-auto"
+  />
+  <input
+    type="color"
+    value={hex.toLowerCase()}
+    aria-label="Selector de color"
+    class="size-12 shrink-0 cursor-pointer rounded-lg border border-border bg-bg p-1 disabled:opacity-60"
+  />
+  <input
+    type="text"
+    name="color_hex"
+    value={hex.toUpperCase()}
+    maxlength="7"
+    pattern="#[0-9A-Fa-f]{6}"
+    title="Color en formato #RRGGBB"
+    aria-label="Código del color"
+    autocomplete="off"
+    spellcheck="false"
+    class="h-12 w-32 min-w-0 flex-1 rounded-lg border border-border bg-bg px-4 text-base uppercase focus-visible:border-focus disabled:opacity-60 sm:w-32 sm:flex-none"
+  />
+  <button
+    type="button"
+    data-remove-color
+    aria-label="Quitar color"
+    class="grid size-12 shrink-0 place-items-center rounded-lg border border-border text-muted transition-[color,background-color,transform] hover:bg-bg hover:text-danger active:scale-95 disabled:opacity-40"
+  >
+    <svg viewBox="0 0 24 24" class="size-5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" aria-hidden="true">
+      <path d="M6 6l12 12M18 6L6 18"></path>
+    </svg>
+  </button>
+</li>

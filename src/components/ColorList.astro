@@ -1,0 +1,80 @@
+---
+import ColorRow from './ColorRow.astro';
+import { MAX_BRAND_COLORS, type BrandColor } from '../lib/projects';
+
+interface Props {
+  colors: BrandColor[];
+}
+
+const { colors } = Astro.props;
+---
+
+<div data-color-list data-max={MAX_BRAND_COLORS}>
+  <ul class="space-y-3" data-color-rows>
+    {colors.map((c) => <ColorRow name={c.name} hex={c.hex} />)}
+  </ul>
+
+  <template data-color-template>
+    <ColorRow />
+  </template>
+
+  <p class="mt-3 hidden text-muted" data-color-empty>Aún no hay colores. Añade el primero.</p>
+
+  <div class="mt-4 flex flex-wrap items-center gap-4">
+    <button
+      type="button"
+      data-add-color
+      class="h-12 rounded-lg border border-border bg-surface px-5 text-base font-semibold transition-[background-color,transform] hover:bg-bg active:scale-[0.98] disabled:opacity-40"
+    >
+      Añadir color
+    </button>
+    <span class="text-muted" data-color-count aria-live="polite"></span>
+  </div>
+</div>
+
+<script>
+  const HEX = /^#[0-9a-f]{6}$/i;
+
+  for (const list of document.querySelectorAll<HTMLElement>('[data-color-list]')) {
+    const rows = list.querySelector<HTMLElement>('[data-color-rows]')!;
+    const template = list.querySelector<HTMLTemplateElement>('[data-color-template]')!;
+    const add = list.querySelector<HTMLButtonElement>('[data-add-color]')!;
+    const count = list.querySelector<HTMLElement>('[data-color-count]')!;
+    const empty = list.querySelector<HTMLElement>('[data-color-empty]')!;
+    const max = Number(list.dataset.max) || 12;
+
+    const refresh = () => {
+      const total = rows.children.length;
+      add.disabled = total >= max;
+      empty.hidden = total > 0;
+      count.textContent = total >= max ? `Máximo ${max} colores` : `${total} de ${max}`;
+    };
+
+    add.addEventListener('click', () => {
+      rows.append(template.content.cloneNode(true));
+      refresh();
+      rows.lastElementChild?.querySelector<HTMLInputElement>('input[name="color_name"]')?.focus();
+    });
+
+    list.addEventListener('click', (event) => {
+      const button = (event.target as HTMLElement).closest('[data-remove-color]');
+      if (!button) return;
+      button.closest('[data-color-row]')?.remove();
+      refresh();
+      add.focus();
+    });
+
+    // El selector y el código hex se mantienen sincronizados en cada fila.
+    list.addEventListener('input', (event) => {
+      const input = event.target as HTMLInputElement;
+      const row = input.closest('[data-color-row]');
+      if (!row) return;
+      const picker = row.querySelector<HTMLInputElement>('input[type="color"]')!;
+      const hex = row.querySelector<HTMLInputElement>('input[name="color_hex"]')!;
+      if (input === picker) hex.value = picker.value.toUpperCase();
+      else if (input === hex && HEX.test(hex.value)) picker.value = hex.value.toLowerCase();
+    });
+
+    refresh();
+  }
+</script>

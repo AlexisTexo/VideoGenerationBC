@@ -1,16 +1,8 @@
 ---
 import Field from './Field.astro';
-import ColorField from './ColorField.astro';
+import ColorList from './ColorList.astro';
 import ProjectLogo from './ProjectLogo.astro';
-import {
-  ASPECTS,
-  FONTS,
-  LANGUAGES,
-  PLATFORMS,
-  SUBTITLE_POSITIONS,
-  type ProjectInput,
-  type SectionId,
-} from '../lib/projects';
+import type { ProjectInput, SectionId } from '../lib/projects';
 
 interface Props {
   section: SectionId;
@@ -58,44 +50,7 @@ const area =
   )
 }
 
-{
-  section === 'marca' && (
-    <div class="grid gap-6 sm:grid-cols-2">
-      <ColorField name="color_primary" label="Color principal" value={p.color_primary} />
-      <ColorField name="color_secondary" label="Color secundario" value={p.color_secondary} />
-      <ColorField name="color_accent" label="Color de acento" value={p.color_accent} />
-      <ColorField name="color_background" label="Fondo" value={p.color_background} />
-      <ColorField name="color_text" label="Texto" value={p.color_text} />
-    </div>
-  )
-}
-
-{
-  section === 'voz' && (
-    <div class="space-y-6">
-      <div class="grid gap-6 sm:grid-cols-2">
-        <Field label="Nombre de la voz" for="voice_name">
-          <input id="voice_name" name="voice_name" maxlength="100" value={p.voice_name} placeholder="Daniela" class={input} />
-        </Field>
-        <Field label="ID de voz (ElevenLabs)" for="voice_id" hint="Lo copias de tu biblioteca de voces en ElevenLabs.">
-          <input id="voice_id" name="voice_id" maxlength="100" value={p.voice_id} autocomplete="off" spellcheck="false" class={input} />
-        </Field>
-      </div>
-      <Field label="Tono de la voz" for="voice_style" hint="Por ejemplo: cálida, segura, ritmo pausado.">
-        <textarea id="voice_style" name="voice_style" maxlength="500" class={area}>{p.voice_style}</textarea>
-      </Field>
-      <Field label="Idioma" for="language">
-        <select id="language" name="language" class={`${input} sm:max-w-xs`}>
-          {LANGUAGES.map((l) => (
-            <option value={l.value} selected={l.value === p.language}>
-              {l.label}
-            </option>
-          ))}
-        </select>
-      </Field>
-    </div>
-  )
-}
+{section === 'marca' && <ColorList colors={p.brand_colors} />}
 
 {
   section === 'contenido' && (
@@ -114,85 +69,6 @@ const area =
       </Field>
       <Field label="Llamado a la acción" for="call_to_action" hint="La frase con la que cierran los videos.">
         <input id="call_to_action" name="call_to_action" maxlength="500" value={p.call_to_action} class={input} />
-      </Field>
-    </div>
-  )
-}
-
-{
-  section === 'subtitulos' && (
-    <div class="grid gap-6 sm:grid-cols-2">
-      <Field label="Tipografía" for="subtitle_font">
-        <select id="subtitle_font" name="subtitle_font" class={input}>
-          {FONTS.map((f) => (
-            <option value={f} selected={f === p.subtitle_font}>
-              {f}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label="Posición" for="subtitle_position">
-        <select id="subtitle_position" name="subtitle_position" class={input}>
-          {SUBTITLE_POSITIONS.map((o) => (
-            <option value={o.value} selected={o.value === p.subtitle_position}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <ColorField name="subtitle_text_color" label="Color del texto" value={p.subtitle_text_color} />
-      <ColorField name="subtitle_highlight_color" label="Color de la palabra activa" value={p.subtitle_highlight_color} />
-      <Field label="Palabras por línea" for="subtitle_words_per_line">
-        <input
-          id="subtitle_words_per_line"
-          name="subtitle_words_per_line"
-          type="number"
-          min="1"
-          max="8"
-          value={p.subtitle_words_per_line}
-          class={input}
-        />
-      </Field>
-      <div class="flex items-end pb-3">
-        <label class="flex cursor-pointer items-center gap-3 font-medium">
-          <input type="checkbox" name="subtitle_uppercase" checked={p.subtitle_uppercase} class="size-5 accent-accent" />
-          Todo en mayúsculas
-        </label>
-      </div>
-    </div>
-  )
-}
-
-{
-  section === 'salida' && (
-    <div class="space-y-6">
-      <div role="group" aria-labelledby="platforms-label">
-        <p id="platforms-label" class="mb-3 font-medium">
-          Plataformas
-        </p>
-        <div class="flex flex-wrap gap-x-8 gap-y-3">
-          {PLATFORMS.map((o) => (
-            <label class="flex cursor-pointer items-center gap-3">
-              <input
-                type="checkbox"
-                name="platforms"
-                value={o.value}
-                checked={p.platforms.includes(o.value)}
-                class="size-5 accent-accent"
-              />
-              {o.label}
-            </label>
-          ))}
-        </div>
-      </div>
-      <Field label="Formato por defecto" for="default_aspect">
-        <select id="default_aspect" name="default_aspect" class={`${input} sm:max-w-xs`}>
-          {ASPECTS.map((o) => (
-            <option value={o.value} selected={o.value === p.default_aspect}>
-              {o.label}
-            </option>
-          ))}
-        </select>
       </Field>
     </div>
   )
