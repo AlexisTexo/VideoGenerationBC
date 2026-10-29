@@ -1,0 +1,103 @@
+---
+import Base from '../layouts/Base.astro';
+
+const sent = Astro.url.searchParams.get('sent') === '1';
+const error = Astro.url.searchParams.get('error');
+
+const errors: Record<string, string> = {
+  email: 'Escribe un correo válido.',
+  auth: 'No pudimos enviar el enlace. Intenta de nuevo.',
+};
+const errorMessage = error ? (errors[error] ?? errors.auth) : null;
+---
+
+<Base title="Entrar · VideoGeneratorBC">
+  <main class="grid min-h-dvh place-items-center px-4 py-12">
+    <div class="w-full max-w-sm">
+      <div class="mb-8 flex items-center gap-3">
+        <span
+          class="grid size-9 place-items-center rounded-lg bg-accent text-accent-fg"
+          aria-hidden="true"
+        >
+          <svg viewBox="0 0 24 24" class="size-5" fill="currentColor">
+            <path d="M8 5.5v13a1 1 0 0 0 1.5.86l10-6.5a1 1 0 0 0 0-1.72l-10-6.5A1 1 0 0 0 8 5.5Z"></path>
+          </svg>
+        </span>
+        <span class="text-sm font-semibold tracking-tight">VideoGeneratorBC</span>
+      </div>
+
+      <div class="rounded-2xl border border-border bg-surface p-6 sm:p-8">
+        {
+          sent ? (
+            <div role="status">
+              <h1 class="text-xl font-semibold tracking-tight">Revisa tu correo</h1>
+              <p class="mt-2 text-sm leading-relaxed text-muted">
+                Te enviamos un enlace de acceso. Ábrelo desde este mismo dispositivo para entrar.
+              </p>
+              <a
+                href="/login"
+                class="mt-6 inline-block text-sm font-medium text-accent underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              >
+                Usar otro correo
+              </a>
+            </div>
+          ) : (
+            <>
+              <h1 class="text-xl font-semibold tracking-tight">Entrar</h1>
+              <p class="mt-2 text-sm leading-relaxed text-muted">
+                Escribe tu correo y te enviamos un enlace de acceso. Sin contraseña.
+              </p>
+
+              <form method="post" action="/api/auth/login" class="mt-6 space-y-4" id="login-form">
+                <div>
+                  <label for="email" class="mb-1.5 block text-sm font-medium">
+                    Correo
+                  </label>
+                  <input
+                    id="email"
+                    name="email"
+                    type="email"
+                    inputmode="email"
+                    autocomplete="email"
+                    required
+                    placeholder="tu@correo.com"
+                    aria-invalid={errorMessage ? 'true' : undefined}
+                    aria-describedby={errorMessage ? 'login-error' : undefined}
+                    class="h-11 w-full rounded-lg border border-border bg-bg px-3.5 text-base placeholder:text-muted/70 focus-visible:border-accent focus-visible:outline-2 focus-visible:outline-offset-0 focus-visible:outline-accent/40"
+                  />
+                  {errorMessage && (
+                    <p id="login-error" role="alert" class="mt-2 text-sm text-danger">
+                      {errorMessage}
+                    </p>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  class="h-11 w-full rounded-lg bg-accent text-sm font-semibold text-accent-fg transition-[filter,transform] hover:brightness-110 active:scale-[0.99] disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+                >
+                  Enviar enlace de acceso
+                </button>
+              </form>
+            </>
+          )
+        }
+      </div>
+
+      <p class="mt-6 text-center text-xs text-muted">
+        ¿Eres aprobador? Usa el mismo correo con el que te invitaron.
+      </p>
+    </div>
+  </main>
+
+  <script>
+    const form = document.getElementById('login-form');
+    form?.addEventListener('submit', () => {
+      const button = form.querySelector('button[type="submit"]');
+      if (button instanceof HTMLButtonElement) {
+        button.disabled = true;
+        button.textContent = 'Enviando…';
+      }
+    });
+  </script>
+</Base>

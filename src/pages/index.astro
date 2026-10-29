@@ -1,0 +1,29 @@
+---
+import Base from '../layouts/Base.astro';
+
+const { user } = Astro.locals;
+---
+
+<Base title="Panel · VideoGeneratorBC">
+  <header class="border-b border-border">
+    <div class="mx-auto flex h-14 max-w-5xl items-center justify-between px-4">
+      <span class="text-sm font-semibold tracking-tight">VideoGeneratorBC</span>
+      <div class="flex items-center gap-3">
+        <span class="hidden text-sm text-muted sm:inline">{user?.email}</span>
+        <form method="post" action="/api/auth/logout">
+          <button
+            type="submit"
+            class="h-9 rounded-lg border border-border px-3 text-sm font-medium hover:bg-surface focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            Salir
+          </button>
+        </form>
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-5xl px-4 py-10">
+    <h1 class="text-2xl font-semibold tracking-tight">Proyectos</h1>
+    <p class="mt-2 text-sm text-muted">Aún no hay proyectos. Aquí aparecerán cuando los crees.</p>
+  </main>
+</Base>
